@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY docs ./docs
-COPY examples ./examples
-COPY scripts ./scripts
+# COPY examples ./examples
+# COPY scripts ./scripts
 
 EXPOSE 8100
 
