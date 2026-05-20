@@ -1,185 +1,202 @@
 # UCE Getting Started
-> Version: 0.1  
-> Last Updated: 2026-05-19
+> Version: 0.3  
+> Last Updated: 2026-05-20
 
 ---
 
-## 1. 개요
+## 1. Overview
 
-이 문서는 UCE를 처음 설치하고 실행하는 과정을 안내한다.
+UCE는 Python + FastAPI 기반의 stateless Context Engineering Middleware이다.
 
-UCE는 Python + FastAPI 기반의 HTTP API 서버이다. 기존 chat backend에 add-on으로 붙이는 형태로 사용한다.
+UCE는 LLM을 직접 호출하지 않는다. application이 현재 메시지, 최근 대화, 외부 메모리, 문서를 UCE에 전달하면 UCE는 LLM에 넣기 좋은 `prompt_pack`을 반환한다. LLM 호출, conversation 저장, memory 저장은 application이 계속 담당한다.
 
 ---
 
-## 2. 사전 요구사항
+## 2. Requirements
 
 - Python 3.11+
 - pip
-- (선택) Ollama — Local LLM 실행 시 필요
+- Docker 또는 로컬 Python 실행 환경
+- 선택: Ollama, EXAONE 3.5 7.8B 등 local LLM
+
+현재 `requirements.txt` 주요 의존성:
+
+```text
+fastapi
+uvicorn[standard]
+pydantic
+python-docx
+openpyxl
+```
+
+`python-docx`와 `openpyxl`은 CLI/document loader에서 `.docx`, `.xlsx`를 markdown으로 변환할 때 사용한다.
 
 ---
 
-## 3. 설치
+## 3. Install
 
 ```bash
-# 저장소 클론
-git clone https://github.com/yourname/uce.git
+git clone https://github.com/kuri-dev9/uce.git
 cd uce
 
-# 가상환경 생성
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# 의존성 설치
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` 기본 구성:
-
-```text
-fastapi>=0.110.0
-uvicorn>=0.29.0
-pydantic>=2.0.0
-tiktoken>=0.6.0
-pytest>=8.0.0
-httpx>=0.27.0
-```
-
 ---
 
-## 4. 실행
+## 4. Run
+
+### Docker
+
+```bash
+docker build -t uce:local .
+docker run --rm -p 8100:8100 uce:local
+```
+
+### Local Development
+
+```bash
+python -m app.server
+```
+
+또는 FastAPI reload가 필요하면:
 
 ```bash
 uvicorn app.main:app --reload --port 8100
 ```
 
-서버가 실행되면 다음 주소에서 접근 가능하다:
+확인:
 
-- API: `http://localhost:8100`
-- 자동 문서: `http://localhost:8100/docs`
-- Health check: `http://localhost:8100/health`
+```bash
+curl http://localhost:8100/health
+curl http://localhost:8100/status
+```
 
 ---
 
-## 5. 기본 사용 흐름
-
-### Step 1: Context Pack 요청
-
-chat backend에서 UCE로 현재 대화를 전달한다.
+## 5. Build Context
 
 ```bash
-curl -X POST http://localhost:8100/build-context \
+curl -sS -X POST http://localhost:8100/build-context \
   -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "test_session_001",
-    "current_message": {
-      "role": "user",
-      "content": "UCE가 뭔지 설명해줘.",
-      "created_at": "2026-05-19T10:00:00+09:00"
-    },
-    "recent_messages": [],
-    "previous_state": null,
-    "optional_memories": [],
-    "options": {
-      "max_prompt_tokens": 4000,
-      "target_model": "ollama:exaone3.5:7.8b",
-      "compression_level": "medium",
-      "include_trace": true
-    }
-  }'
+  --data-binary @examples/build-context.sample.json
 ```
 
-### Step 2: 반환된 prompt_pack으로 LLM 호출
-
-UCE가 반환한 `prompt_pack.content`를 그대로 LLM에 전달한다.
+응답의 `prompt_pack.content`를 application이 선택한 LLM에 전달한다.
 
 ```python
-# 예시: Ollama 호출
-import httpx
+uce_response = requests.post("http://localhost:8100/build-context", json=payload).json()
+prompt = uce_response["prompt_pack"]["content"]
 
-# 1. UCE에서 prompt_pack 받기
-uce_response = httpx.post("http://localhost:8100/build-context", json=payload)
-prompt_pack = uce_response.json()["prompt_pack"]["content"]
-new_state = uce_response.json()["conversation_state"]
-
-# 2. Ollama에 prompt_pack 전달
-ollama_response = httpx.post("http://localhost:11434/api/generate", json={
-    "model": "exaone3.5:7.8b",
-    "prompt": prompt_pack,
-    "stream": False
-})
-llm_answer = ollama_response.json()["response"]
-```
-
-### Step 3: 응답 분석 요청
-
-LLM 응답을 UCE로 보내 다음 state를 받는다.
-
-```python
-analyze_response = httpx.post("http://localhost:8100/analyze-response", json={
-    "session_id": "test_session_001",
-    "current_message": {"role": "user", "content": "UCE가 뭔지 설명해줘."},
-    "assistant_response": {"role": "assistant", "content": llm_answer},
-    "conversation_state": new_state,
-    "options": {
-        "extract_memory_candidates": True,
-        "extract_open_questions": True
-    }
-})
-
-state_patch = analyze_response.json()["next_state_patch"]
-# state_patch를 저장해두고 다음 턴에 previous_state로 사용
-```
-
-### Step 4: 다음 턴에 state 전달
-
-```python
-# 다음 턴 요청 시 previous_state에 이전 state 전달
-payload_next_turn = {
-    "session_id": "test_session_001",
-    "current_message": {...},
-    "recent_messages": [...],
-    "previous_state": new_state,  # ← 이전 턴 state
-    ...
-}
+# application이 기존 LLM entrypoint로 prompt를 전달한다.
 ```
 
 ---
 
-## 6. Ollama + EXAONE 3.5 7.8b 설정
+## 6. Queryless Document Compression
+
+`current_message`는 optional이다. 메시지가 없거나 빈 문자열이면 UCE는 질문 없이 전체 문서를 중요도 순으로 압축한다.
 
 ```bash
-# Ollama 설치 (미설치 시)
-curl -fsSL https://ollama.com/install.sh | sh
+python3 scripts/try-uce.py \
+  --context docs/architecture.md \
+  --debug-retrieval \
+  --show-prompts
+```
 
-# EXAONE 3.5 7.8b 다운로드
+이 모드는 "문서를 먼저 정돈하고 압축된 prompt/context를 보고 싶을 때" 사용한다.
+
+---
+
+## 7. Try One Message
+
+문서 없이 단일 질문 비교:
+
+```bash
+python3 scripts/try-uce.py \
+  --message "UCE 라고 알아?" \
+  --show-prompts
+```
+
+문서를 UCE에만 전달하고 raw prompt와 UCE prompt를 비교:
+
+```bash
+python3 scripts/try-uce.py \
+  --context docs/architecture.md \
+  --message "UCE의 Phase 2 목표가 뭐야?" \
+  --debug-retrieval \
+  --show-prompts
+```
+
+중요: raw/normal prompt에는 문서를 넣지 않는다. 그래야 "문서 없이 답하는 LLM"과 "UCE가 문서를 선별/압축해 전달한 LLM"을 비교할 수 있다.
+
+---
+
+## 8. docx / xlsx
+
+CLI는 `.docx`, `.xlsx` 파일을 markdown으로 변환해 기존 UCE pipeline에 전달한다.
+
+```bash
+python3 scripts/try-uce.py \
+  --context path/to/spec.docx \
+  --message "이 문서의 핵심 목표가 뭐야?" \
+  --debug-retrieval
+```
+
+```bash
+python3 scripts/try-uce.py \
+  --context path/to/data.xlsx \
+  --message "각 시트의 핵심 내용을 요약해줘" \
+  --debug-retrieval
+```
+
+Phase 2의 xlsx 처리는 sheet를 markdown table로 전달하는 방식이다. 정확한 count/filter/aggregation은 Phase 3 SpreadsheetAdapter 범위다.
+
+---
+
+## 9. Compare Raw vs UCE With Ollama
+
+```bash
 ollama pull exaone3.5:7.8b
-
-# 실행 확인
-ollama run exaone3.5:7.8b "안녕하세요"
+python3 scripts/compare-ollama.py examples/eval/scenario-01-ghost-constraint.json
 ```
 
-UCE options에서 `target_model`을 `"ollama:exaone3.5:7.8b"`로 설정하면 EXAONE 최적화 prompt profile이 적용된다.
+결과는 `--save` 또는 runner 설정에 따라 `runs/` 아래에 저장된다. 기본 개발 검증은 pytest가 아니라 scenario runner와 수동 확인 중심이다.
 
 ---
 
-## 7. 테스트 실행
+## 10. Integration Pattern
 
-```bash
-pytest tests/ -v
+기존 backend에 붙일 때는 UCE를 HTTP add-on으로 둔다.
+
+```text
+Frontend
+  -> Backend
+  -> UCE /build-context
+  -> Backend LLM entrypoint
+  -> LLM
 ```
 
-골든 테스트 (동일 입력 → 안정적인 prompt 구조 검증):
+실패 시 반드시 legacy prompt flow로 fallback한다.
 
-```bash
-pytest tests/test_golden.py -v
+```python
+try:
+    uce_result = await uce_client.build_context(...)
+    messages = convert_prompt_pack(uce_result["prompt_pack"])
+except Exception:
+    messages = legacy_messages
 ```
+
+UCE는 conversation DB를 소유하지 않는다. 기존 application이 conversation, messages, storage, LLM orchestration을 계속 소유한다.
 
 ---
 
-## 8. 다음 단계
+## 11. Next Docs
 
-- [API Reference](./api-reference.md) — 전체 API 명세
-- [Implementation Guide](./implementation-guide.md) — 컴포넌트별 구현 가이드
-- [Roadmap](./roadmap.md) — 앞으로의 방향
+- [Architecture](./architecture.md)
+- [API Reference](./api-reference.md)
+- [Roadmap](./roadmap.md)
+- [Phase 2 Validation](./phase2-validation.md)
+

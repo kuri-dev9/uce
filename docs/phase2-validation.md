@@ -1,13 +1,32 @@
-# UCE Phase 2 Validation Strategy
-> Version: 0.1  
-> Last Updated: 2026-05-19  
-> Scope: Practical validation and lightweight evolution
+# UCE Phase 2 Validation
+> Version: 0.3  
+> Last Updated: 2026-05-20  
+> Scope: Practical validation, implemented runner flow, and remaining limits
 
 ---
 
-## 1. Phase 2 Objective
+## 1. Current Status
 
-UCE Phase 2 is not a large architecture expansion.
+UCE Phase 2 is implemented.
+
+Implemented Phase 2 scope:
+
+- adaptive compression
+- section-level document retrieval
+- heading-aware and explainable scoring
+- structure-preserving markdown/code splitting
+- docx/xlsx loader adapters for CLI usage
+- queryless document compression mode
+- raw vs UCE comparison runner
+- scenario fixtures
+- optional reasondock middleware integration
+- fallback and metrics propagation in the host application
+
+Phase 2 is still intentionally small. UCE has not become a RAG platform, vector DB, memory store, agent framework, or LLM provider.
+
+---
+
+## 2. Phase 2 Objective
 
 The immediate goal is to validate whether UCE-generated `prompt_pack` improves real local LLM responses compared with raw conversation input.
 
@@ -30,7 +49,37 @@ Does UCE produce better, more stable LLM responses for real conversations?
 
 ---
 
-## 2. What To Compare
+## 3. Observed reasondock Validation
+
+An initial real integration check was performed through reasondock with UCE enabled as optional middleware.
+
+| Metric | Legacy | UCE |
+| --- | ---: | ---: |
+| `use_uce` | false | true |
+| `fallback_used` | false | false |
+| `original_prompt_tokens` | 829 | 911 |
+| `final_prompt_tokens` | 829 | 377 |
+| `compression_ratio` | 1.0 | 0.17 |
+| `build_context_latency_ms` | 0 | 13 |
+| `llm_first_token_ms` | 43136 | 28136 |
+| `llm_total_latency_ms` | 73821 | 43392 |
+| `selected_context_count` | 0 | 1 |
+| `intent` | `-` | `explain` |
+| `topic_relation` | `-` | `new_topic` |
+
+Interpretation:
+
+- UCE selected one relevant context block instead of passing a larger raw context.
+- Prompt size dropped from 911 original tokens to 377 final tokens.
+- First token latency and total latency improved in this run.
+- The host application remained responsible for LLM calling and storage.
+- Fallback was not used, but fallback behavior is implemented and required.
+
+This is not a benchmark result. It is a practical smoke result proving that Phase 2 can be validated inside a real application flow.
+
+---
+
+## 4. What To Compare
 
 For the same scenario, compare two inputs to the same LLM.
 
@@ -60,7 +109,7 @@ The LLM, temperature, max tokens, and user question must remain identical betwee
 
 ---
 
-## 3. Evaluation Criteria
+## 5. Evaluation Criteria
 
 This is not benchmark science. The goal is practical improvement validation.
 
@@ -88,7 +137,7 @@ Do not overfit the system to one model response. Run each scenario at least 3 ti
 
 ---
 
-## 4. Validation Scenarios
+## 6. Validation Scenarios
 
 Start with 6 practical scenarios.
 
@@ -110,7 +159,7 @@ Each scenario should have:
 - expected important constraints
 - expected dropped context, if any
 
-### 4.1 Stress Scenario Fixtures
+### 6.1 Stress Scenario Fixtures
 
 The first validation set uses three intentionally difficult scenarios. These are designed to expose when a local model loses attention, forgets constraints, follows misleading context, or over-focuses on irrelevant noise.
 
@@ -139,7 +188,7 @@ The `uce_request` object can be sent directly to `/build-context`.
 
 `scenario-04-phase2-heading-retrieval.json` uses `document_context.path` so the validation runner loads `docs/architecture.md` as a full markdown document before calling UCE.
 
-### 4.2 Scenario 1: Ghost Constraint
+### 6.2 Scenario 1: Ghost Constraint
 
 Purpose:
 
@@ -168,7 +217,7 @@ UCE expected behavior:
 - Surface it near the top of `prompt_pack`.
 - Preserve it even after long scoring/decay/prompt-design discussion.
 
-### 4.3 Scenario 2: Reasoning Drift
+### 6.3 Scenario 2: Reasoning Drift
 
 Purpose:
 
@@ -197,7 +246,7 @@ UCE expected behavior:
 - Treat Pinecone discussion as reference context, not current architecture.
 - Explain performance limits under the actual JSON-based design.
 
-### 4.4 Scenario 3: Context Junk
+### 6.4 Scenario 3: Context Junk
 
 Purpose:
 
@@ -228,7 +277,7 @@ UCE expected behavior:
 
 ---
 
-## 5. EXAONE Validation Workflow
+## 7. EXAONE Validation Workflow
 
 UCE core remains provider-agnostic. A validation script can call both UCE and Ollama externally.
 
@@ -269,7 +318,7 @@ The runner is a development tool, not UCE core.
 
 ---
 
-## 6. Prompt Comparison Example
+## 8. Prompt Comparison Example
 
 ### Raw Prompt Example
 
@@ -327,9 +376,9 @@ Expected improvement:
 
 ---
 
-## 7. Lightweight Component Updates
+## 9. Lightweight Component Updates
 
-Only two Phase 2 core improvements should be considered now.
+Phase 2 intentionally stayed focused on two core improvements.
 
 1. Adaptive Compression
 2. Context Importance Scoring
@@ -345,9 +394,9 @@ Do not add:
 
 ---
 
-## 8. Adaptive Compression
+## 10. Adaptive Compression
 
-Current compression is generic. Phase 2 should make compression intent-aware while staying heuristic and explainable.
+Adaptive compression is implemented as heuristic, intent-aware compression. The goal is not abstractive summarization quality; the goal is preserving the right evidence, decisions, constraints, and structure for the current intent.
 
 ### 8.1 Compression Profiles
 
@@ -467,9 +516,9 @@ Recommended output metadata:
 
 ---
 
-## 9. Context Importance Scoring
+## 11. Context Importance Scoring
 
-Current retrieval scoring is too simple. Phase 2 should add a lightweight multi-factor score.
+Phase 2 uses a lightweight multi-factor score. It remains explainable and deterministic, with no mandatory vector DB or embedding dependency.
 
 For documents, retrieval follows `retrieve large -> compress locally`. UCE first retrieves coherent sections, then compresses only inside selected sections. This avoids tiny unrelated chunks competing with semantic overview sections.
 
@@ -565,7 +614,7 @@ No vector DB required.
 
 ---
 
-## 10. Updated Retrieval Flow
+## 12. Updated Retrieval Flow
 
 ```text
 Input request
@@ -587,7 +636,7 @@ This keeps UCE small while improving the two observed weak spots:
 
 ---
 
-## 11. Minimal Architecture Changes
+## 13. Minimal Architecture Changes
 
 Add or update only:
 
@@ -609,7 +658,7 @@ Do not change:
 
 ---
 
-## 12. Validation Output Format
+## 14. Validation Output Format
 
 The comparison runner should save JSONL records.
 
@@ -641,7 +690,7 @@ Human review fills `manual_scores`.
 
 ---
 
-## 13. Success Criteria
+## 15. Success Criteria
 
 Phase 2 should be considered useful only if validation shows practical gains.
 
@@ -662,7 +711,7 @@ If EXAONE validation does not show improvement, do not add more architecture. Fi
 
 ---
 
-## 14. Backlog Only
+## 16. Backlog Only
 
 These ideas are intentionally not Phase 2 work:
 
@@ -679,7 +728,7 @@ They may become relevant only after repeated validation failures justify them.
 
 ---
 
-## 15. Recommended Next Step
+## 17. Recommended Next Step
 
 Implement the external EXAONE comparison runner first.
 

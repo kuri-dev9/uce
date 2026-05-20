@@ -1,6 +1,6 @@
 # UCE Architecture Document
 > Project: Universal Context Engine  
-> Version: 0.4
+> Version: 0.5
 > Last Updated: 2026-05-20
 
 ---
@@ -38,6 +38,15 @@ User Input
 ```
 
 UCE의 중심 가치는 모델 성능 자체를 올리는 것이 아니라, 모델이 더 적은 토큰으로 더 일관된 reasoning을 수행할 수 있도록 입력 상태를 정돈하는 데 있다.
+
+현재 구현 상태:
+
+- Phase 1 Context Pack MVP 완료
+- Phase 2 Practical Context Engineering 완료
+- markdown/text/code/docx/xlsx 입력 처리 지원
+- section-level retrieval + explainable scoring 구현
+- queryless document compression mode 지원
+- reasondock optional middleware 통합 검증 완료
 
 ---
 
@@ -271,30 +280,34 @@ Topic relation:
 - `ambiguous`: 최근 일부 context와 stripped state만 사용
 - `new_topic`: recent context를 사용하지 않고 active project/focus/goal만 제거한 state 사용
 
-Threshold는 고정 정책이 아니라 `BuildContextOptions`에서 조정 가능해야 한다.
+Threshold는 고정 정책이 아니라 `BuildContextOptions`에서 조정 가능하다.
 
-MVP retrieval:
+현재 retrieval:
 - 최근 N개 메시지
-- keyword overlap scoring
-- optional embedding similarity
+- keyword/token overlap scoring
+- topic policy 기반 recent context 사용량 조절
 - previous conversation state 참조
+- document section-level retrieval
 
-MVP에서는 Vector DB 불필요. in-memory scoring + BM25-lite 수준으로 시작 가능.
+UCE는 embedding-first retrieval을 사용하지 않는다. Vector DB는 필수 dependency가 아니며, Phase 2는 deterministic heuristic scoring으로 동작한다.
 
 ### 6.5 Context Ranker
 
-후보 context를 relevance, recency, semantic importance 기준으로 정렬한다.
+후보 context를 heading relevance, semantic continuity, intent alignment, recency, constraint relevance 기준으로 정렬한다.
 
 ```text
-context_score =
-  0.40 * semantic_relevance
-+ 0.25 * intent_alignment
-+ 0.15 * recency
-+ 0.15 * importance
-+ 0.05 * source_confidence
+final_score =
+  0.35 * heading_score
++ 0.20 * section_coherence_score
++ 0.18 * semantic_score
++ 0.12 * intent_alignment_score
++ 0.08 * recency_score
++ 0.07 * constraint_score
 ```
 
-MVP에서는 keyword score + heuristic으로 근사 가능.
+여기에 `decision_score`, `section_priority_score`, exact heading match, mismatch penalty를 작은 boost/penalty로 더한다.
+
+Ranker는 선택/탈락 이유를 `survived_items`, `dropped_items`, `score_breakdown`으로 노출한다.
 
 ### 6.6 Semantic Compressor
 
@@ -317,6 +330,8 @@ User is building UCE, a stateless provider-agnostic middleware that assembles co
 | `light` | 충분한 context window | 중복 제거 중심 |
 | `medium` | 일반 MVP 기본값 | 핵심 사실, 제약, 결정 중심 |
 | `aggressive` | Local LLM, 작은 context window | 최소 정보만 유지 |
+
+코드 파일은 aggressive outline compression 대상이 아니다. 코드 입력은 function/class/module header 단위로 분리하고, 선택된 code section은 계산 흐름과 indentation을 보존하는 방향으로 compact한다.
 
 ### 6.7 Prompt Synthesizer
 
@@ -394,7 +409,7 @@ Request:
   "current_message": {
     "role": "user",
     "content": "UCE 설계 문서를 작성해줘.",
-    "created_at": "2026-05-19T10:00:00+09:00"
+    "created_at": "2026-05-20T10:00:00+09:00"
   },
   "recent_messages": [...],
   "previous_state": {
@@ -420,6 +435,19 @@ Request:
     "include_trace": true
   }
 }
+```
+
+`current_message`는 optional이다. 없거나 `content`가 빈 문자열이면 UCE는 queryless document compression mode로 동작한다.
+
+```text
+current_message 있음:
+  기존 conversational pipeline
+
+current_message 없음:
+  summarize intent
+  fresh_context policy
+  recent retrieval 생략
+  document sections를 중요도 순으로 압축
 ```
 
 Response:
@@ -497,6 +525,7 @@ Response:
   "version": "0.1.0",
   "components": {
     "intent_analyzer": "ok",
+    "retriever": "ok",
     "compressor": "ok",
     "prompt_synthesizer": "ok"
   }
@@ -509,7 +538,8 @@ Response:
 {
   "compression_level": "medium",
   "intent_mode": "rule_based",
-  "active_provider_profiles": ["ollama_exaone", "generic"],
+  "target_model_note": "EXAONE 3.5 7.8b is the first target profile, not a model limit.",
+  "active_provider_profiles": ["generic", "ollama_exaone_7b", "ollama_qwen", "ollama_gemma", "cloud_large"],
   "uptime_seconds": 3842
 }
 ```
@@ -663,7 +693,7 @@ Safety margin              15%   600 tokens
 - tool execution
 - long-term memory 소유
 
-### Phase 2: Practical Context Engineering (🔄 진행 중)
+### Phase 2: Practical Context Engineering (✅ 완료)
 
 핵심 목표: **다양한 입력 타입을 실전 환경에서 안정적으로 처리하고, UCE를 외부 프로젝트에 내장 가능한 수준으로 완성한다.**
 
@@ -676,12 +706,14 @@ Safety margin              15%   600 tokens
 - Adaptive Compression (intent별 보존 항목 분기)
 - Context Importance Scoring (multi-factor)
 - xlsx 전체 전달 모드 (Phase 2 한계 인정, Phase 3에서 해결)
+- Scenario fixtures 및 EXAONE comparison runner
+- reasondock optional middleware 통합
+- fallback 및 prompt/debug metrics 검증
 
-진행 예정:
-- reasondock 내장 통합
+다음 단계:
 - NewSpeed 내장 통합
-- Scenario fixtures 작성
-- Manual evaluation rubric 정의
+- scenario 결과 리포트 포맷 정리
+- SpreadsheetAdapter 설계 구체화
 
 #### xlsx 처리 방침 (Phase 2)
 
@@ -724,7 +756,7 @@ LLM이 집계 / 필터 / 카운트 직접 수행
 - narrative state tracking
 - relation-aware memory selection
 
-Phase 3의 개념 설계는 섹션 18(Future Architecture Vision)에 별도로 기술한다.
+Phase 3의 개념 설계는 섹션 18(SpreadsheetAdapter)과 섹션 19(Future Architecture Vision)에 별도로 기술한다.
 
 ---
 
@@ -734,8 +766,9 @@ Phase 3의 개념 설계는 섹션 18(Future Architecture Vision)에 별도로 �
 Python 3.11+
 FastAPI
 Pydantic v2
-SQLite (optional demo storage만)
-sentence-transformers (Phase 2, optional)
+uvicorn[standard]
+python-docx
+openpyxl
 ```
 
 검증은 pytest 중심이 아니라 scenario runner 중심으로 수행한다.
@@ -769,12 +802,10 @@ uce/
       response_analyzer.py
       structure_splitter.py
     adapters/
-      memory.py
+      document_loader.py
       token_counter.py
       provider_profiles.py
-    templates/
-      default_prompt.md
-      exaone_prompt.md
+      __init__.py
   scripts/
     compare-ollama.py
     try-uce.py
@@ -784,6 +815,7 @@ uce/
       scenario-01-ghost-constraint.json
       scenario-02-reasoning-drift.json
       scenario-03-context-junk.json
+      scenario-04-phase2-heading-retrieval.json
   docs/
     architecture.md
     getting-started.md
@@ -820,6 +852,8 @@ uce/
 - UCE는 memory DB를 강제하지 않는다
 - 한국어 대화에서 문맥이 자연스럽게 이어진다
 
+현재까지의 validation 기준에서 Phase 1/2 성공 기준은 충족했다. reasondock 통합에서는 UCE 사용 시 prompt token이 911에서 377로 줄고, first token latency와 total latency가 감소하는 practical validation 결과가 확인되었다. 이 수치는 benchmark가 아니라 실제 통합 smoke result로 취급한다.
+
 ---
 
 ## 17. Practical Chunking Strategy (Phase 2)
@@ -837,17 +871,18 @@ Phase 2의 목표는 SAU 없이도 다음을 달성하는 현실적인 전략이
 
 ### 17.1 UCE Core Input Boundary
 
-UCE core는 text normalization 이후만 처리한다.
+UCE core는 text normalization 이후의 content를 처리한다. HTTP API는 파일 upload API가 아니며, application은 문서 내용을 text로 읽어서 `documents[].content`에 전달한다.
 
 ```text
-UCE Core가 처리하는 단계:
+UCE Core가 처리하는 입력:
 - normalized text
 - markdown
+- code
 - chat history
 - structured text (json/yaml)
 - plain log
 
-Application adapter가 담당하는 단계:
+Adapter가 담당하는 입력 변환:
 - docx parsing
 - xlsx extraction
 - pdf OCR
@@ -855,7 +890,7 @@ Application adapter가 담당하는 단계:
 - binary format 변환
 ```
 
-UCE가 docx/xlsx/pdf를 직접 파싱하는 것은 scope 외부이다. application이 normalized text로 변환하여 UCE에 전달한다.
+UCE repo는 개발 편의를 위해 `app/adapters/document_loader.py`의 `load_docx`, `load_xlsx`를 제공한다. 이 adapter는 docx/xlsx를 markdown으로 변환한 뒤 기존 pipeline에 넘긴다. PDF/OCR 및 대용량 binary attachment 처리는 아직 application responsibility이다.
 
 ### 17.2 Practical Retrieval Pipeline
 
@@ -914,7 +949,7 @@ UCE core는 LangChain dependency를 강제하지 않는다. 동일한 로직을 
 \n\n  →  \n  →  sentence  →  whitespace  →  character
 ```
 
-목표는 가능한 semantic continuity를 유지하면서 context window 초과 시 점진적으로 분할하는 것이다. 문단 단위에서 먼저 시도하고, 그래도 초과하면 문장, 근로 순서로 마저 분할한다.
+목표는 가능한 semantic continuity를 유지하면서 context window 초과 시 점진적으로 분할하는 것이다. 문단 단위에서 먼저 시도하고, 그래도 초과하면 문장, 단어 순서로 마저 분할한다.
 
 ### 17.5 Metadata Enrichment
 
@@ -1003,11 +1038,11 @@ Phase 2에서 intent별로 압축 전략을 분기한다. constraints와 decisio
 
 ---
 
-## 19. SpreadsheetAdapter 상세 설계 (Phase 3)
+## 18. SpreadsheetAdapter 상세 설계 (Phase 3)
 
 > 이 섹션은 Phase 3 구현 대상이다. Phase 2에서는 xlsx 전체 전달 방식을 사용한다.
 
-### 19.1 설계 배경
+### 18.1 설계 배경
 
 xlsx/csv는 semantic document가 아니라 임시 데이터베이스에 가깝다.
 사용자 질문의 대부분은 count / filter / aggregation / grouping이며,
@@ -1021,7 +1056,7 @@ raw 행을 LLM에게 통째로 넘기는 것은 비효율적이고 정확도도 
   xlsx → pandas count(고장대응) = 47 → facts["고장대응: 47건"] → LLM → 설명만
 ```
 
-### 19.2 처리 흐름
+### 18.2 처리 흐름
 
 ```text
 자연어 질문
@@ -1039,7 +1074,7 @@ LLM은 절대 pandas 코드를 직접 생성하거나 실행하지 않는다.
 QueryPlan이라는 구조화된 중간 표현만 생성하고,
 실제 실행은 DataFrameExecutor가 허용된 연산자 집합으로만 수행한다.
 
-### 19.3 Query Intent 분류
+### 18.3 Query Intent 분류
 
 | Intent | 키워드 예시 |
 |--------|------------|
@@ -1051,7 +1086,7 @@ QueryPlan이라는 구조화된 중간 표현만 생성하고,
 | TIMESERIES | "월별", "주별", "추이" |
 | MIXED | 위 조합 |
 
-### 19.4 Schema Profiling
+### 18.4 Schema Profiling
 
 파일 로딩 시 1회 수행, 결과를 캐시한다.
 
@@ -1064,7 +1099,7 @@ QueryPlan이라는 구조화된 중간 표현만 생성하고,
 | categorical_values | is_categorical이면 전체 고유값 목록 |
 | sample_values | 상위 10개 샘플값 |
 
-### 19.5 컬럼 매핑 전략
+### 18.5 컬럼 매핑 전략
 
 "고장대응"이 어느 컬럼의 값인지 추론하는 4단계:
 
@@ -1075,7 +1110,7 @@ QueryPlan이라는 구조화된 중간 표현만 생성하고,
 4단계: LLM fallback — schema_profile + query → column/value 추론만
 ```
 
-### 19.6 QueryPlan Schema
+### 18.6 QueryPlan Schema
 
 ```json
 {
@@ -1095,7 +1130,7 @@ QueryPlan이라는 구조화된 중간 표현만 생성하고,
 }
 ```
 
-### 19.7 Query Complexity 허용 범위
+### 18.7 Query Complexity 허용 범위
 
 | 허용 | 비허용 |
 |------|--------|
@@ -1107,7 +1142,7 @@ QueryPlan이라는 구조화된 중간 표현만 생성하고,
 
 complexity 초과 시 facts에 "처리 범위 초과" 메시지를 넣고 종료한다.
 
-### 19.8 Orchestrator 분기
+### 18.8 Orchestrator 분기
 
 ```text
 content_type == "xlsx" or "csv"
@@ -1119,7 +1154,7 @@ content_type == 그 외
     → 기존 semantic retrieval 경로
 ```
 
-### 19.9 Adapter Interface
+### 18.9 Adapter Interface
 
 ```python
 class SpreadsheetAdapter:
@@ -1132,13 +1167,13 @@ class SpreadsheetAdapter:
 
 ---
 
-## 18. Future Architecture Vision (Phase 3)
+## 19. Future Architecture Vision (Phase 3)
 
 > 이 섹션은 현재 구현 범위가 아니다. Phase 3 이후의 장기 방향성을 기술한다.
 
 UCE는 "contextual chunking + heuristic scoring"에서 시작하여, 장기적으로 "Semantic Reasoning Runtime"으로 진화하는 방향을 대상으로 한다.
 
-### 18.1 Semantic Atomic Unit (SAU)
+### 19.1 Semantic Atomic Unit (SAU)
 
 Phase 3에서 retrieval 단위는 token chunk가 아니라 **Semantic Atomic Unit(SAU)**으로 재정의된다.
 
@@ -1161,7 +1196,7 @@ raw sentences
   → SAU generation
 ```
 
-### 18.2 Semantic Classification
+### 19.2 Semantic Classification
 
 추출된 SAU는 reasoning에서의 역할에 따라 분류된다.
 
@@ -1177,7 +1212,7 @@ raw sentences
 | `deprecated` | 번복된 결정, 무효화된 정보 |
 | `noise` | reasoning에 기여하지 않는 단위 |
 
-### 18.3 SAU Lifecycle
+### 19.3 SAU Lifecycle
 
 각 SAU는 lifecycle state를 가진다. 저장은 application이 담당한다.
 
@@ -1197,12 +1232,12 @@ archived   → 이력 보존 목적으로 유지
   "state": "deprecated",
   "replaced_by": "decision_141",
   "deprecated_reason": "Redis 제거 결정",
-  "created_at": "2026-05-19T09:00:00+09:00",
-  "updated_at": "2026-05-19T11:30:00+09:00"
+  "created_at": "2026-05-20T09:00:00+09:00",
+  "updated_at": "2026-05-20T11:30:00+09:00"
 }
 ```
 
-### 18.4 Semantic Survival
+### 19.4 Semantic Survival
 
 ```text
 무엇을 검색할 것인가보다
@@ -1217,7 +1252,7 @@ Priority 3 (공간 남을 때): example
 제외 대상: deprecated, replaced, conflicted, noise
 ```
 
-### 18.5 Policy-Aware Retrieval
+### 19.5 Policy-Aware Retrieval
 
 Phase 3에서 retrieval은 semantic similarity만으로 동작하지 않는다. reasoning safety를 semantic relevance보다 우선할 수 있다.
 
@@ -1235,7 +1270,7 @@ Phase 3에서 retrieval은 semantic similarity만으로 동작하지 않는다. 
 - topic_relation이 new_topic일 때 project-specific SAU → 제외
 ```
 
-### 18.6 Reasoning Runtime 철학
+### 19.6 Reasoning Runtime 철학
 
 RAG는 증거를 검색한다. UCE는 reasoning state를 유지한다.
 
@@ -1250,7 +1285,7 @@ UCE가 제어하는 것은 **"LLM이 무엇을 foreground attention에 유지해
 
 token chunking 기반 RAG가 "관련 있는 것을 찾는" 시스템이라면, UCE는 "지금 reasoning에 살아있어야 하는 것을 유지하는" 시스템이다.
 
-### 18.7 현실적 구현 우선순위
+### 19.7 현실적 구현 우선순위
 
 지금 가장 중요한 목표:
 

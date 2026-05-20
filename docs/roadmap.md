@@ -1,277 +1,186 @@
 # UCE Roadmap
-> Version: 0.2
+> Version: 0.3  
 > Last Updated: 2026-05-20
 
 ---
 
-## 현재 위치
+## Current Position
 
-UCE v0.2는 Phase 1 MVP 구현을 완료하고 Phase 2 실전 검증을 진행 중이다.
+UCE는 Phase 1 MVP와 Phase 2 Practical Context Engineering 구현을 완료했다.
 
-1차 타겟: **EXAONE 3.5 7.8b (Ollama)** + **한국어 대화**
-이식 대상: **reasondock** (대화형 채팅 앱), **NewSpeed** (뉴스 이벤트 파이프라인)
+현재 UCE는 다음 상태로 동작한다.
+
+- stateless HTTP middleware
+- provider-agnostic Context Pack generator
+- local LLM 검증용 raw vs UCE 비교 도구 보유
+- markdown/text/code/docx/xlsx 입력을 normalized context로 처리
+- section-level retrieval + local compression 기반 prompt assembly
+- reasondock에 optional middleware로 통합되어 실제 채팅 흐름에서 검증 가능
+
+1차 검증 모델은 **EXAONE 3.5 7.8B via Ollama**이다. 단, 이는 첫 target profile일 뿐 모델 제한이 아니다.
 
 ---
 
 ## Phase 1 — Context Pack MVP
 
-**목표**: UCE의 핵심 가치를 가장 작게 검증한다.
-
-**완료 기준**:
-- `/build-context` 응답만으로 LLM 호출 prompt를 만들 수 있다
-- 최근 대화가 길어져도 핵심 목표/제약이 prompt에 유지된다
-- EXAONE 3.5에서 반복 설명 없이 대화가 이어진다
-- token 사용량이 원본 대비 의미 있게 감소한다
-
-**구현 항목**:
+**목표**: UCE가 LLM 앞단에서 prompt pack을 생성하는 독립 middleware로 동작하는지 검증한다.
 
 | 항목 | 설명 | 상태 |
 |------|------|------|
-| `POST /build-context` | Core API | 🔲 구현 예정 |
-| `POST /analyze-response` | 응답 분석 API | 🔲 구현 예정 |
-| `GET /health`, `GET /status` | 상태 확인 API | 🔲 구현 예정 |
-| Intent Analyzer (rule-based) | keyword 기반 분류 | 🔲 구현 예정 |
-| Conversation State Builder | state 구성 및 patch | 🔲 구현 예정 |
-| Recent Context Retriever | 최근 N개 + keyword overlap | 🔲 구현 예정 |
-| Semantic Compressor (heuristic) | 중복 제거 + 구조화 | 🔲 구현 예정 |
-| Prompt Synthesizer | structured prompt 생성 | 🔲 구현 예정 |
-| EXAONE provider profile | 한국어 + 7.8b 최적화 | 🔲 구현 예정 |
-| 기본 테스트 suite | unit + golden prompt test | 🔲 구현 예정 |
-| chat_demo 연동 테스트 | 실제 대화 흐름 검증 | ✅ 완료 |
+| `POST /build-context` | context pack 생성 API | ✅ 완료 |
+| `POST /analyze-response` | 응답 분석 및 state patch 후보 생성 | ✅ 완료 |
+| `GET /health`, `GET /status` | 상태 확인 API | ✅ 완료 |
+| Intent Analyzer | rule-based intent 분류 | ✅ 완료 |
+| Conversation State Builder | active project/focus/goal/constraints/decisions 구성 | ✅ 완료 |
+| Recent Context Retriever | 최근 대화 기반 context 후보 선택 | ✅ 완료 |
+| Topic Shift Detector | continue/related/ambiguous/new_topic policy 결정 | ✅ 완료 |
+| Semantic Compressor | constraints/decisions/facts 중심 압축 | ✅ 완료 |
+| Prompt Synthesizer | structured prompt pack 생성 | ✅ 완료 |
+| Provider Profiles | generic, EXAONE, Qwen, Gemma, cloud_large profile | ✅ 완료 |
+| Docker Runtime | Dockerfile + graceful shutdown server | ✅ 완료 |
+
+Phase 1의 핵심 결론:
+
+```text
+UCE는 LLM을 호출하지 않아도, 기존 backend가 바로 사용할 수 있는 prompt_pack을 생성할 수 있다.
+```
 
 ---
 
 ## Phase 2 — Practical Context Engineering
 
-**목표**: 다양한 입력 타입을 실전 환경에서 안정적으로 처리하고,
-UCE를 외부 프로젝트(reasondock, NewSpeed)에 내장 가능한 수준으로 완성한다.
-
-**구현 항목**:
+**목표**: 실제 문서/대화/코드 입력에서 retrieval 품질을 개선하고, raw prompt 대비 UCE prompt pack이 실용적 이점을 주는지 검증한다.
 
 | 항목 | 설명 | 상태 |
 |------|------|------|
-| Content-Type Aware Processing | markdown / code / docx / xlsx / text 타입별 분기 처리 | ✅ 완료 |
-| Structure-Preserving Chunking | heading / function / table 단위 semantic boundary 기반 분할 | ✅ 완료 |
-| document_loader (docx/xlsx) | python-docx / openpyxl 기반 문서 추출 및 markdown 변환 | ✅ 완료 |
-| current_message optional | query 없이 전체 중요도 순 압축 모드 지원 | ✅ 완료 |
-| Explainable Retrieval debug | score breakdown / survived / dropped 출력 | ✅ 완료 |
-| EXAONE comparison runner | raw prompt vs UCE prompt_pack 응답 비교 | ✅ 완료 |
-| Adaptive Compression | intent별 보존 항목 분기 | ✅ 완료 |
-| Context Importance Scoring | heading / coherence / intent / constraint 기반 multi-factor scoring | ✅ 완료 |
-| xlsx 전체 전달 모드 | SpreadsheetAdapter 없이 전체 시트를 context로 전달 | ✅ 완료 |
-| reasondock 내장 | 대화형 채팅 앱 add-on 통합 | 🔲 진행 예정 |
-| NewSpeed 내장 | 뉴스 원문 → UCE 압축 → EXAONE 이벤트 추출 파이프라인 통합 | 🔲 진행 예정 |
-| Scenario fixtures | continue / topic-shift / long / constraint-sensitive 케이스 | 🔲 진행 예정 |
-| Manual evaluation rubric | constraint preservation / hallucination / continuity 기준 | 🔲 진행 예정 |
+| Content-Type Aware Processing | markdown / text / code / json / yaml / log / docx / xlsx 처리 경로 | ✅ 완료 |
+| Structure-Preserving Chunking | markdown heading tree, code symbol block 기반 분할 | ✅ 완료 |
+| Section-Level Retrieval | small chunk first 대신 large semantic block first | ✅ 완료 |
+| Heading-Aware Scoring | heading, section path, exact heading priority 반영 | ✅ 완료 |
+| Context Importance Scoring | semantic, heading, coherence, intent, constraint, recency 기반 scoring | ✅ 완료 |
+| Explainable Retrieval Metadata | selected/dropped item, score breakdown, selected_reason | ✅ 완료 |
+| Adaptive Compression | intent별 보존 항목 조정 | ✅ 완료 |
+| Code Compression Guard | 코드 입력은 aggressive outline 압축을 피하고 구조 보존 | ✅ 완료 |
+| Table/Code Fence Handling | markdown table과 code fence 내용 소실 방지 | ✅ 완료 |
+| `current_message` Optional | query 없이 전체 문서를 중요도 순으로 압축하는 모드 | ✅ 완료 |
+| `document_loader` | python-docx/openpyxl 기반 docx/xlsx → markdown 변환 | ✅ 완료 |
+| Scenario Fixtures | ghost constraint, reasoning drift, context junk, Phase 2 heading retrieval | ✅ 완료 |
+| `scripts/compare-ollama.py` | raw vs UCE EXAONE 비교 runner | ✅ 완료 |
+| `scripts/try-uce.py` | 임의 입력/문서로 prompt pack과 LLM 응답 확인 | ✅ 완료 |
+| reasondock Integration | optional UCE middleware, fallback, metrics, debug panel | ✅ 완료 |
 
-**조건**: Phase 1 MVP 완료 후 진행. 현재 진행 중.
-
-상세 설계: [Phase 2 Validation Strategy](./phase2-validation.md)
-
-### Phase 2 — xlsx 처리 방침
-
-Phase 2에서 xlsx/csv는 **전체 시트를 context로 전달**하는 방식을 사용한다.
+Phase 2의 핵심 결론:
 
 ```text
-xlsx 파일 입력
-    ↓
-document_loader → sheet별 markdown 테이블 변환
-    ↓
-structure_splitter → sheet 단위 섹션 분할
-    ↓
-전체 내용 → UCE context → LLM 전달
-    ↓
-LLM이 집계 / 필터 / 카운트 직접 수행
+retrieve large → compress locally
 ```
 
-**한계**: 행 수가 많을 경우 token limit 초과 가능. LLM의 수치 연산 정확도 보장 불가.
-이 한계는 Phase 3의 SpreadsheetAdapter로 해결한다.
+문서 retrieval은 paragraph 단위 조각이 아니라 H1/H2/H3 및 code symbol 같은 semantic block을 먼저 선택한다. token reduction은 선택된 section 내부에서 수행한다.
+
+---
+
+## Phase 2 Validation Result
+
+reasondock 통합 후 실제 채팅 흐름에서 다음 비교가 확인되었다.
+
+| 항목 | Legacy | UCE |
+|------|--------|-----|
+| `use_uce` | false | true |
+| `fallback_used` | false | false |
+| `original_prompt_tokens` | 829 | 911 |
+| `final_prompt_tokens` | 829 | 377 |
+| `compression_ratio` | 1.0 | 0.17 |
+| `llm_first_token_ms` | 43136 | 28136 |
+| `llm_total_latency_ms` | 73821 | 43392 |
+| `selected_context_count` | 0 | 1 |
+| `intent` | `-` | `explain` |
+| `topic_relation` | `-` | `new_topic` |
+
+이 결과는 benchmark가 아니라 practical validation이다. 의미 있는 점은 다음이다.
+
+- UCE가 문서에서 관련 context만 선별했다.
+- prompt token이 크게 줄었다.
+- first token latency와 total latency가 감소했다.
+- fallback 없이 기존 LLM entrypoint를 유지했다.
+- legacy flow는 UCE 없이 계속 동작했다.
+
+---
+
+## Phase 2 Known Limits
+
+현재 의도적으로 남겨둔 한계:
+
+- xlsx는 Phase 2에서 sheet 전체를 markdown table로 전달한다.
+- 수치 집계/count/filter 정확도는 LLM에게 맡기지 않는 것이 바람직하다.
+- PDF/OCR은 아직 core scope가 아니다.
+- persistent memory store는 제공하지 않는다.
+- vector DB나 embedding-first retrieval은 도입하지 않았다.
+- automatic benchmark scoring은 아직 없다. 현재는 scenario runner + manual review 중심이다.
 
 ---
 
 ## Phase 3 — Type-Aware Preprocessing Runtime
 
-**목표**: 입력 타입별 전용 Adapter 아키텍처를 도입하여
-UCE를 범용 type-aware preprocessing runtime으로 발전시킨다.
+**목표**: 문서 타입별 전용 adapter를 도입하여 UCE를 더 안정적인 preprocessing runtime으로 확장한다.
 
-**구현 항목**:
+Phase 3 후보:
 
 | 항목 | 설명 |
 |------|------|
-| SpreadsheetAdapter | 자연어 → QueryPlan → pandas 실행 → facts 주입 |
-| LogAdapter | timestamp grouping / trace 보존 / error chain 추출 |
-| CodeAdapter 고도화 | AST-lite symbol indexing / call relation 보존 |
-| Adaptive compression 고도화 | intent + model profile 동적 분기 |
-| Narrative state tracking | topic/decision/constraint node 기반 대화 구조화 |
-| Relation-aware memory selection | 관계 기반 memory 우선순위 결정 |
-| Prompt quality evaluation | 생성된 prompt의 품질 자체 평가 |
-| Dynamic context prioritization | 실시간 context 중요도 재계산 |
+| SpreadsheetAdapter | xlsx/csv를 raw context가 아니라 QueryPlan + deterministic execution으로 처리 |
+| LogAdapter | timestamp grouping, trace chain, error event extraction |
+| CodeAdapter 고도화 | AST-lite symbol indexing, call relation, dependency context |
+| Adaptive Compression 고도화 | intent + model profile + document type 기반 동적 압축 |
+| Evaluation Report Generator | scenario 결과를 누적하고 human score와 metadata 비교 |
+| Prompt Leak Guard 고도화 | debug/prompt context가 사용자 응답에 노출되지 않도록 추가 방어 |
 
-### Phase 3 — SpreadsheetAdapter 상세 설계
+### SpreadsheetAdapter 방향
 
-xlsx/csv는 semantic document가 아니라 **임시 데이터베이스**에 가깝다.
-사용자 질문의 대부분은 count / filter / aggregation / grouping이며,
-raw 행을 LLM에게 통째로 넘기는 것은 비효율적이고 정확도도 낮다.
-
-#### 핵심 원칙
+Phase 3에서 xlsx/csv는 semantic document가 아니라 임시 데이터 테이블로 취급한다.
 
 ```text
 자연어 질문
-    ↓
-RuleBasedPlanner  — intent 분류 + 컬럼 매핑 (confidence >= 0.7)
-    ↓ confidence < 0.7이면
-LLM Planner  — QueryPlan JSON만 생성 (코드 실행 안 함)
-    ↓
-DataFrameExecutor  — deterministic pandas 실행
-    ↓
-facts[] 주입  — LLM은 설명만 담당
+  -> RuleBasedPlanner 또는 LLM Planner(QueryPlan만 생성)
+  -> DataFrameExecutor가 deterministic 실행
+  -> facts[] 생성
+  -> LLM은 계산 결과 설명만 담당
 ```
 
-LLM은 절대 pandas 코드를 직접 생성하거나 실행하지 않는다.
-LLM은 QueryPlan이라는 구조화된 중간 표현만 생성하고,
-실제 실행은 DataFrameExecutor가 허용된 연산자 집합으로만 수행한다.
-
-#### Schema Profiling
-
-파일 로딩 시 1회 수행, 결과를 캐시한다.
-
-| 항목 | 내용 |
-|------|------|
-| 컬럼명 | 원본 그대로 보존 |
-| dtype 추론 | str / int / float / datetime |
-| null_ratio | 결측치 비율 |
-| is_categorical | unique_count < 30 and unique_count/total < 0.1 |
-| categorical_values | is_categorical이면 전체 고유값 목록 |
-| sample_values | 상위 10개 샘플값 |
-
-#### 컬럼 매핑 전략
-
-"고장대응"이 어느 컬럼의 값인지 추론하는 과정:
-
-```text
-1단계: 컬럼명 직접 매칭
-2단계: categorical 컬럼의 categorical_values에서 검색  ← 주요 경로
-3단계: 부분 문자열 매칭 (confidence 하락)
-4단계: LLM fallback — schema_profile + query → column/value 추론만
-```
-
-#### QueryPlan Schema
-
-```json
-{
-  "intent": "COUNT | FILTER | AGGREGATE | GROUP | SORT | TIMESERIES | MIXED",
-  "target_sheet": "Sheet1",
-  "filters": [
-    {"column": "운영업무 세부구분", "operator": "eq", "value": "고장대응"}
-  ],
-  "group_by": [],
-  "aggregate": {"*": "count"},
-  "sort_by": [],
-  "limit": null,
-  "time_column": null,
-  "time_granularity": null,
-  "confidence": 0.95,
-  "planner": "rule_based"
-}
-```
-
-#### Query Complexity 허용 범위
-
-| 허용 | 비허용 |
-|------|--------|
-| filter + count / aggregate | JOIN across sheets (complex) |
-| GROUP BY + aggregate | 중첩 subquery |
-| multi-filter (AND 조건) | 통계 모델링 (regression 등) |
-| TIMESERIES 월별/주별 집계 | LLM이 pandas 코드 직접 생성 |
-| TOP N + sort | eval() 실행 |
-
-complexity 초과 시 facts에 "처리 범위 초과" 메시지를 넣고 종료한다.
-
-#### Orchestrator 분기
-
-```text
-content_type == "xlsx" or "csv"
-    → SpreadsheetAdapter 경로
-    → structure_splitter / retriever / compressor 생략
-    → facts[] 직접 주입
-
-content_type == 그 외
-    → 기존 semantic retrieval 경로
-```
-
-#### Adapter Interface
-
-```python
-class SpreadsheetAdapter:
-    def load(self, path: Path) -> None
-    def profile(self) -> dict[str, list[ColumnProfile]]
-    def plan(self, query: str) -> QueryPlan
-    def execute(self, plan: QueryPlan) -> QueryResult
-    def to_facts(self, result: QueryResult) -> list[str]
-```
+LLM이 pandas 코드를 직접 생성하거나 실행하지 않는다.
 
 ---
 
-## 장기 방향
+## Next Work
 
-UCE가 지켜야 할 장기 원칙:
+우선순위는 다음과 같다.
+
+1. NewSpeed 통합 검증
+2. reasondock UCE debug metrics 개선
+3. scenario 결과 리포트 포맷 정리
+4. xlsx/csv SpreadsheetAdapter 설계 확정
+5. 코드/로그 adapter 고도화 범위 결정
+
+---
+
+## Long-Term Direction
+
+UCE가 지켜야 할 원칙:
 
 ```text
 Own the assembly.
 Do not own the world.
 ```
 
-UCE는 끝까지 다음이 되지 않는다:
+UCE는 다음이 되지 않는다.
+
 - Memory platform
 - Autonomous agent framework
 - Full RAG system
+- Vector DB platform
 - LLM provider
 
 UCE가 될 것:
-- 모든 LLM 애플리케이션 앞단에 붙을 수 있는 context preparation layer
-- Local LLM과 cloud LLM 모두에서 대화 연속성, token efficiency, prompt quality를 개선하는 범용 middleware
 
----
+- 모든 LLM application 앞단에 붙을 수 있는 context preparation layer
+- local LLM과 cloud LLM 모두에서 대화 연속성, token efficiency, prompt quality를 개선하는 middleware
 
-## 확장 가능성 (Phase 3 이후)
-
-다음은 UCE의 범위를 벗어나지 않으면서 추가 가능한 방향이다.
-
-### Narrative Graph (읽기 전용)
-
-application이 제공하는 graph memory를 읽어 context assembly에 활용. UCE가 graph를 저장하지는 않는다.
-
-```text
-topic node → decision node → constraint node
-                ↓
-         unresolved question node
-```
-
-### Multi-model Orchestration
-
-동일한 Context Pack을 여러 모델에 동시 전달하고 응답을 비교하는 실험적 기능.
-
-### Streaming Context Pack
-
-긴 대화에서 Context Pack을 streaming으로 점진적으로 구성하는 방식.
-
----
-
-## 하지 않을 것 (영구 제외)
-
-- Vector DB 소유 및 운영
-- 사용자 데이터 장기 저장
-- Agent workflow 구현
-- Tool execution
-- 자체 LLM fine-tuning
-- 특정 provider 종속 설계
-
----
-
-## 현재 진행 중인 작업 (Phase 2)
-
-1. reasondock 내장 통합 작업
-2. NewSpeed 내장 통합 작업
-3. current_message optional 모드 검증
-4. Scenario fixtures 작성
-5. Manual evaluation rubric 정의

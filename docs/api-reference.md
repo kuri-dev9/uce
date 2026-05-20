@@ -1,6 +1,6 @@
 # UCE API Reference
-> Version: 0.1  
-> Last Updated: 2026-05-19
+> Version: 0.3  
+> Last Updated: 2026-05-20
 
 Base URL: `http://localhost:8100`
 
@@ -8,85 +8,41 @@ Base URL: `http://localhost:8100`
 
 ## POST /build-context
 
-현재 사용자 메시지와 최근 대화, 선택적 메모리를 받아 LLM에 전달할 Context Pack을 생성한다.
+현재 메시지, 최근 대화, 선택적 메모리, 문서를 받아 LLM에 전달할 `Context Pack`을 생성한다.
+
+UCE는 LLM을 호출하지 않는다. 응답의 `prompt_pack.content`를 application이 기존 LLM entrypoint로 전달한다.
 
 ### Request Body
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `session_id` | string | ✅ | 세션 식별자 |
-| `current_message` | Message | ✅ | 현재 사용자 메시지 |
-| `recent_messages` | Message[] | ✅ | 최근 대화 목록 (비어 있어도 됨) |
+| `current_message` | Message \| null | ❌ | 현재 사용자 메시지. 없거나 빈 문자열이면 queryless document compression mode |
+| `recent_messages` | Message[] | ❌ | 최근 대화 목록 |
 | `previous_state` | State \| null | ❌ | 이전 턴에서 받은 conversation_state |
-| `optional_memories` | Memory[] | ❌ | 외부에서 전달하는 메모리 목록 |
-| `documents` | Document[] | ❌ | 매 요청에 함께 전달하는 normalized text/markdown 문서. UCE는 저장하지 않음 |
+| `optional_memories` | Memory[] | ❌ | 외부 application이 전달하는 메모리 |
+| `documents` | Document[] | ❌ | 매 요청에 함께 전달하는 문서 |
 | `options` | Options | ❌ | 동작 옵션 |
 
-#### Message
+### Message
 
 ```json
 {
   "id": "msg_001",
-  "role": "user | assistant",
-  "content": "메시지 내용",
-  "created_at": "2026-05-19T10:00:00+09:00"
+  "role": "user",
+  "content": "UCE가 뭔지 설명해줘.",
+  "created_at": "2026-05-20T10:00:00+09:00"
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | string | ❌ | 메시지 식별자 |
-| `role` | string | ✅ | `user` 또는 `assistant` |
-| `content` | string | ✅ | 메시지 본문 |
-| `created_at` | string (ISO 8601) | ❌ | 생성 시각 |
+| `role` | `user | assistant | system` | ❌ | 기본값 `user` |
+| `content` | string | ❌ | 기본값 `""` |
+| `created_at` | string | ❌ | ISO 8601 |
 
-#### Memory
-
-```json
-{
-  "id": "mem_001",
-  "type": "project_constraint | decision | fact | user_preference | unresolved_issue",
-  "content": "UCE는 stateless middleware이다.",
-  "importance": 0.9,
-  "created_at": "2026-05-19T09:00:00+09:00"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | string | ❌ | 메모리 식별자 |
-| `type` | string | ✅ | 메모리 종류 |
-| `content` | string | ✅ | 메모리 내용 |
-| `importance` | float (0.0~1.0) | ❌ | 중요도. 기본값 0.5 |
-| `created_at` | string (ISO 8601) | ❌ | 생성 시각 |
-
-#### Options
-
-```json
-{
-  "max_prompt_tokens": 4000,
-  "target_model": "ollama:exaone3.5:7.8b",
-  "compression_level": "medium",
-  "include_trace": true,
-  "structure_chunking_enabled": true,
-  "chunk_max_chars": 1400,
-  "chunk_overlap_chars": 120,
-  "survival_metadata_limit": 20
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `max_prompt_tokens` | int | 4000 | 최대 prompt token 수 |
-| `target_model` | string | `"generic"` | 대상 모델. provider profile 결정에 사용 |
-| `compression_level` | string | `"medium"` | `light` \| `medium` \| `aggressive` |
-| `include_trace` | bool | true | metadata에 trace 포함 여부 |
-| `structure_chunking_enabled` | bool | true | documents 입력에 structure-aware chunking 적용 |
-| `chunk_max_chars` | int | 1400 | document chunk 최대 글자 수 |
-| `chunk_overlap_chars` | int | 120 | 긴 chunk 분할 시 overlap |
-| `survival_metadata_limit` | int | 20 | survived/dropped metadata 최대 개수 |
-
-#### Document
+### Document
 
 ```json
 {
@@ -99,7 +55,91 @@ Base URL: `http://localhost:8100`
 }
 ```
 
-`documents`는 매 요청 입력이다. UCE는 문서를 저장하지 않으며, 파일 파싱도 담당하지 않는다. application이 docx/pdf/xlsx 등을 text 또는 markdown으로 변환한 뒤 전달한다.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | ❌ | 문서 식별자 |
+| `title` | string | ❌ | 문서 제목 |
+| `content` | string | ✅ | 문서 내용. API는 파일 경로가 아니라 이미 읽힌 text를 받는다 |
+| `content_type` | string | ❌ | `markdown`, `text`, `code`, `json`, `yaml`, `log`, `docx`, `xlsx` |
+| `source` | string | ❌ | 원본 출처 |
+| `importance` | float | ❌ | application 제공 중요도. 기본 0.5 |
+
+HTTP API는 file upload API가 아니다. `.docx`, `.xlsx` 파일은 application 또는 UCE CLI adapter가 markdown/text로 변환한 뒤 `content`에 넣어 전달한다. UCE repo는 개발 편의를 위해 `app/adapters/document_loader.py`의 `load_docx`, `load_xlsx`를 제공한다.
+
+### Memory
+
+```json
+{
+  "id": "mem_001",
+  "type": "project_constraint",
+  "content": "UCE는 stateless middleware이다.",
+  "importance": 0.9,
+  "confidence": 0.8,
+  "created_at": "2026-05-20T09:00:00+09:00"
+}
+```
+
+UCE는 memory를 저장하지 않는다. application이 전달한 memory를 읽고 prompt assembly에 반영할 뿐이다.
+
+### Options
+
+```json
+{
+  "max_prompt_tokens": 4000,
+  "target_model": "ollama:exaone3.5:7.8b",
+  "compression_level": "medium",
+  "include_trace": true,
+  "max_recent_messages": 15,
+  "topic_shift_enabled": true,
+  "structure_chunking_enabled": true,
+  "chunk_max_chars": 1400,
+  "chunk_overlap_chars": 120,
+  "survival_metadata_limit": 20
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_prompt_tokens` | int | 4000 | 최대 prompt token 목표 |
+| `target_model` | string | `generic` | provider profile 선택 힌트 |
+| `compression_level` | `light | medium | aggressive` | `medium` | 압축 강도 |
+| `include_trace` | bool | true | trace/debug metadata 포함 |
+| `max_recent_messages` | int | 15 | 최근 대화 최대 사용 개수 |
+| `topic_shift_enabled` | bool | true | topic shift detector 사용 |
+| `topic_continue_threshold` | float | 0.18 | continue 판정 threshold |
+| `topic_related_threshold` | float | 0.08 | related 판정 threshold |
+| `topic_ambiguous_short_message_chars` | int | 12 | 짧은 메시지 ambiguous 처리 기준 |
+| `structure_chunking_enabled` | bool | true | document structure parsing 사용 |
+| `chunk_max_chars` | int | 1400 | 긴 section 내부 compression 기준 |
+| `chunk_overlap_chars` | int | 120 | 긴 chunk 분할 시 overlap |
+| `survival_metadata_limit` | int | 20 | selected/dropped debug metadata 최대 개수 |
+
+### Queryless Mode
+
+`current_message`가 없거나 `content`가 빈 문자열이면 UCE는 질문 없이 문서 전체를 중요도 순으로 압축한다.
+
+동작:
+
+- intent는 `summarize`
+- topic policy는 `fresh_context`
+- recent message retrieval은 생략
+- document sections를 중요도 순으로 ranking
+- min score 제한 없이 document candidates를 선택
+
+예시:
+
+```json
+{
+  "session_id": "doc_summary_001",
+  "documents": [
+    {
+      "title": "UCE Architecture",
+      "content": "# UCE Architecture...",
+      "content_type": "markdown"
+    }
+  ]
+}
+```
 
 ### Response Body
 
@@ -109,42 +149,42 @@ Base URL: `http://localhost:8100`
   "conversation_state": {
     "active_project": "UCE",
     "current_focus": "architecture design",
-    "user_goal": "Local LLM 앞에 UCE 붙이기",
-    "important_constraints": [
-      "UCE는 stateless middleware",
-      "memory를 직접 소유하지 않음"
-    ],
+    "user_goal": "UCE Phase 2 목표 설명",
+    "important_constraints": [],
     "open_questions": [],
-    "decisions": [
-      "Python + FastAPI 사용",
-      "EXAONE 3.5 7.8b가 1차 타겟"
-    ],
-    "reasoning_mode": "technical_design"
+    "decisions": [],
+    "reasoning_mode": "explanation"
   },
   "compressed_context": {
-    "summary": "User is building UCE...",
+    "summary": "- Document: ...",
     "facts": [],
-    "constraints": ["UCE는 stateless middleware"],
-    "decisions": ["Python + FastAPI 사용"],
+    "constraints": [],
+    "decisions": [],
     "open_questions": [],
-    "token_estimate": 320
+    "token_estimate": 377
   },
   "prompt_pack": {
     "format": "structured_text",
-    "content": "[Current Goal]\n...\n[Current User Question]\n...",
-    "estimated_tokens": 2800,
-    "original_tokens": 8400
+    "content": "[System Role]\n...",
+    "estimated_tokens": 377,
+    "original_tokens": 911
   },
   "metadata": {
     "trace_id": "trace_abc123",
-    "primary_intent": "design",
-    "intent_confidence": 0.87,
-    "selected_context_count": 6,
-    "dropped_context_count": 11,
+    "primary_intent": "explain",
+    "secondary_intents": [],
+    "intent_confidence": 0.95,
+    "topic_relation": "new_topic",
+    "context_policy": "fresh_context",
+    "topic_confidence": 0.78,
+    "topic_reason": "low overlap with previous conversation and state",
+    "selected_context_count": 1,
+    "dropped_context_count": 0,
     "retrieval_confidence": 0.74,
     "retrieval_warning": null,
-    "compression_ratio": 0.33,
-    "prompt_build_latency_ms": 38,
+    "compression_ratio": 0.17,
+    "prompt_build_latency_ms": 13,
+    "provider_profile": "ollama_exaone_7b",
     "survived_items": [],
     "dropped_items": [],
     "survival_reasons": {}
@@ -152,30 +192,31 @@ Base URL: `http://localhost:8100`
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `session_id` | string | 요청한 세션 식별자 |
-| `conversation_state` | State | 현재 턴에서 생성된 state. 다음 턴 previous_state로 사용 |
-| `compressed_context` | CompressedContext | 압축된 context 구조 |
-| `prompt_pack` | PromptPack | LLM에 전달할 최종 prompt |
-| `metadata` | Metadata | 처리 통계 및 trace 정보 |
+`survived_items`와 `dropped_items`에는 explainable retrieval을 위한 score breakdown이 들어간다.
 
-`retrieval_confidence`는 선택된 상위 context의 평균 score이다. 값이 낮으면 `retrieval_warning`에 `no_context_selected` 또는 `low_relevance_context`가 들어간다. 이 값은 "문서에 정보가 없다"와 "retriever가 관련 chunk를 제대로 못 찾았다"를 구분하기 위한 debugging signal이다.
+주요 score:
 
-#### PromptPack
+- `semantic_score`
+- `heading_score`
+- `section_path_score`
+- `section_priority_score`
+- `section_coherence_score`
+- `recency_score`
+- `intent_alignment_score`
+- `constraint_score`
+- `decision_score`
+- `mismatch_penalty`
+- `final_score`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `format` | string | 항상 `"structured_text"` |
-| `content` | string | LLM에 전달할 prompt 전문 |
-| `estimated_tokens` | int | 생성된 prompt의 예상 token 수 |
-| `original_tokens` | int | 압축 전 원본 context의 token 수 |
+`retrieval_warning`은 관련 context를 충분히 찾지 못했을 때 `no_context_selected` 또는 `low_relevance_context`가 된다.
 
 ---
 
 ## POST /analyze-response
 
 LLM 응답을 분석하여 다음 state patch와 memory candidates를 반환한다.
+
+UCE는 저장하지 않는다. application이 반환값을 저장할지 결정한다.
 
 ### Request Body
 
@@ -196,19 +237,12 @@ LLM 응답을 분석하여 다음 state patch와 memory candidates를 반환한�
   },
   "options": {
     "extract_memory_candidates": true,
-    "extract_open_questions": true
+    "extract_open_questions": true,
+    "topic_relation": "continue_topic",
+    "context_policy": "full_context"
   }
 }
 ```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `session_id` | string | ✅ | 세션 식별자 |
-| `current_message` | Message | ✅ | 사용자 메시지 |
-| `assistant_response` | Message | ✅ | LLM 응답 |
-| `conversation_state` | State | ✅ | 현재 conversation_state |
-| `options.extract_memory_candidates` | bool | ❌ | memory 후보 추출 여부. 기본 true |
-| `options.extract_open_questions` | bool | ❌ | 미결 질문 추출 여부. 기본 true |
 
 ### Response Body
 
@@ -228,40 +262,16 @@ LLM 응답을 분석하여 다음 state patch와 memory candidates를 반환한�
       "confidence": 0.91
     }
   ],
-  "unresolved_issues": [
-    "Storage adapter interface가 아직 확정되지 않음"
-  ],
+  "unresolved_issues": [],
   "metadata": {
     "semantic_importance": 0.78
   }
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `next_state_patch` | object | 다음 턴 state에 병합할 patch |
-| `memory_candidates` | MemoryCandidate[] | 저장 제안 목록. 저장 여부는 application이 결정 |
-| `unresolved_issues` | string[] | 미결 사항 목록 |
-| `metadata.semantic_importance` | float | 응답의 의미적 중요도 (0.0~1.0) |
-
-#### MemoryCandidate
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | `user_preference \| project_constraint \| decision \| fact \| unresolved_issue` |
-| `content` | string | 저장 후보 내용 |
-| `importance` | float | 중요도 (0.0~1.0) |
-| `stability` | string | `session \| long_term` |
-| `source` | string | 출처 |
-| `confidence` | float | 추출 신뢰도 (0.0~1.0) |
-
 ---
 
 ## GET /health
-
-서비스 상태 확인.
-
-### Response
 
 ```json
 {
@@ -269,6 +279,7 @@ LLM 응답을 분석하여 다음 state patch와 memory candidates를 반환한�
   "version": "0.1.0",
   "components": {
     "intent_analyzer": "ok",
+    "retriever": "ok",
     "compressor": "ok",
     "prompt_synthesizer": "ok"
   }
@@ -279,50 +290,47 @@ LLM 응답을 분석하여 다음 state patch와 memory candidates를 반환한�
 
 ## GET /status
 
-런타임 상태 확인.
-
-### Response
-
 ```json
 {
   "compression_level": "medium",
   "intent_mode": "rule_based",
-  "active_provider_profiles": ["ollama_exaone", "generic"],
+  "target_model_note": "EXAONE 3.5 7.8b is the first target profile, not a model limit.",
+  "active_provider_profiles": [
+    "generic",
+    "ollama_exaone_7b",
+    "ollama_qwen",
+    "ollama_gemma",
+    "cloud_large"
+  ],
   "uptime_seconds": 3842
 }
 ```
 
 ---
 
-## Error Responses
+## Error Behavior
 
-모든 API는 오류 시 다음 형식으로 응답한다.
+FastAPI validation error는 기본 `422` 응답을 반환한다.
 
-```json
-{
-  "error": "validation_error",
-  "message": "current_message.role must be 'user' or 'assistant'",
-  "trace_id": "trace_abc123"
-}
-```
+Integration 측에서는 UCE 실패를 반드시 legacy prompt flow로 fallback해야 한다.
 
-| HTTP Status | Error Type | Description |
-|-------------|------------|-------------|
-| 400 | `validation_error` | 요청 스키마 오류 |
-| 422 | `unprocessable_entity` | 필드 값 오류 |
-| 500 | `internal_error` | 서버 내부 오류 |
+Fallback 대상:
+
+- UCE unavailable
+- timeout
+- invalid response
+- HTTP 5xx
+- unexpected exception
 
 ---
 
-## Provider Profile 목록
+## Provider Profiles
 
-`options.target_model`에 따라 자동으로 provider profile이 선택된다.
+| target model hint | Profile |
+|-------------------|---------|
+| `exaone`, `exaone3.5`, `ollama:exaone3.5:7.8b` | `ollama_exaone_7b` |
+| `qwen` | `ollama_qwen` |
+| `gemma` | `ollama_gemma` |
+| cloud/large model hints | `cloud_large` |
+| default | `generic` |
 
-| target_model | Profile | max_tokens | compression |
-|--------------|---------|-----------|-------------|
-| `ollama:exaone3.5:7.8b` | `ollama_exaone_7b` | 4000 | medium |
-| `ollama:qwen*` | `ollama_qwen` | 4000 | medium |
-| `ollama:gemma*` | `ollama_gemma` | 4000 | medium |
-| `openai:gpt-4*` | `openai_gpt4` | 8000 | light |
-| `anthropic:claude*` | `anthropic_claude` | 8000 | light |
-| `generic` | `generic` | 4000 | medium |
