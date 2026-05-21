@@ -11,15 +11,19 @@ def rank_context_items(
 ) -> tuple[list[ContextItem], list[ContextItem]]:
     sorted_items = sorted(items, key=lambda item: item.score, reverse=True)
     if min_score is None:
-        selected = sorted_items[:limit]
-        dropped = [_with_drop_reason(item, "limit_exceeded") for item in sorted_items[limit:]]
+        selected = [_with_threshold(item, None) for item in sorted_items[:limit]]
+        dropped = [_with_drop_reason(item, "limit_exceeded", None) for item in sorted_items[limit:]]
         return selected, dropped
 
     eligible = [item for item in sorted_items if item.score >= min_score]
-    selected = eligible[:limit]
+    selected = [_with_threshold(item, min_score) for item in eligible[:limit]]
     selected_ids = {item.id for item in selected}
     dropped = [
-        _with_drop_reason(item, "limit_exceeded" if item.score >= min_score else "below_min_score")
+        _with_drop_reason(
+            item,
+            "limit_exceeded" if item.score >= min_score else "below_min_score",
+            min_score,
+        )
         for item in sorted_items
         if item.id not in selected_ids
     ]
@@ -75,5 +79,24 @@ def _preview(text: str, head: int = 700, tail: int = 300) -> str:
     return f"{compact[:head]}...{compact[-tail:]}"
 
 
-def _with_drop_reason(item: ContextItem, reason: str) -> ContextItem:
-    return replace(item, drop_reason=reason)
+def _with_drop_reason(item: ContextItem, reason: str, threshold: float | None) -> ContextItem:
+    return replace(
+        item,
+        drop_reason=reason,
+        score_breakdown={
+            **item.score_breakdown,
+            "threshold": threshold,
+            "drop_reason": reason,
+        },
+    )
+
+
+def _with_threshold(item: ContextItem, threshold: float | None) -> ContextItem:
+    return replace(
+        item,
+        score_breakdown={
+            **item.score_breakdown,
+            "threshold": threshold,
+            "drop_reason": None,
+        },
+    )

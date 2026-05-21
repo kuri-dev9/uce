@@ -29,6 +29,25 @@ CODING_MARKERS = ["error", "traceback", "파일", "함수", "class", "api", "end
 SUMMARY_MARKERS = ["요약", "정리", "결정", "미결", "다음", "chronology"]
 HEADING_STOPWORDS = set()
 GOAL_QUERY_MARKERS = {"목표", "목적", "뭐야", "무엇", "왜", "이유", "정의", "개요"}
+QUERY_FILLER_TOKENS = {
+    "가",
+    "이",
+    "은",
+    "는",
+    "을",
+    "를",
+    "뭐야",
+    "무엇",
+    "설명",
+    "설명해줘",
+    "알려줘",
+    "what",
+    "is",
+    "are",
+    "the",
+    "about",
+}
+KOREAN_PARTICLE_SUFFIXES = ("이란", "란", "가", "이", "은", "는", "을", "를")
 
 
 def retrieve_context(
@@ -42,7 +61,7 @@ def retrieve_context(
         return []
 
     bounded_messages = recent_messages[-max_items:]
-    query_words = set(tokenize(current_message.content))
+    query_words = set(normalize_query_tokens(current_message.content))
     results: list[ContextItem] = []
 
     for index, message in enumerate(bounded_messages):
@@ -80,7 +99,7 @@ def retrieve_document_chunks(
     intent_name: str = "continue_discussion",
     query_type: str = "what",
 ) -> list[ContextItem]:
-    query_words = set(tokenize(current_message.content))
+    query_words = set(normalize_query_tokens(current_message.content))
     results: list[ContextItem] = []
     for section in chunks:
         descendant_titles = " ".join(section.metadata.get("descendant_titles", []))
@@ -144,8 +163,8 @@ def score_text(
     heading_level: int = 0,
 ) -> tuple[float, dict[str, float], str]:
     expanded_query_words = expand_query_words(query_words)
-    content_words = set(tokenize(content))
-    heading_words = set(tokenize(heading_text))
+    content_words = set(normalize_text_tokens(content))
+    heading_words = set(normalize_text_tokens(heading_text))
     heading_query_words = {word for word in expanded_query_words if not word.isdigit() and word not in HEADING_STOPWORDS}
     significant_heading_words = {word for word in heading_words if not word.isdigit() and word not in HEADING_STOPWORDS}
     overlap = len(query_words & content_words)
@@ -208,6 +227,13 @@ def score_text(
         "heading_score": round(heading_score, 4),
         "heading_overlap": heading_overlap,
         "heading_match": sorted(heading_query_words & significant_heading_words),
+        "heading_match_reason": _heading_match_reason(
+            query_tokens=heading_query_words,
+            heading_tokens=significant_heading_words,
+        ),
+        "heading_match_detected": heading_overlap > 0,
+        "normalized_query_tokens": sorted(heading_query_words),
+        "normalized_heading_tokens": sorted(significant_heading_words),
         "exact_match_score": round(exact_match_score, 4),
         "section_path_score": round(heading_score, 4),
         "heading_depth": heading_depth,
@@ -224,6 +250,8 @@ def score_text(
         "importance_score": round(importance_score, 4),
         "final_score": round(final_score, 4),
         "truncation_reason": None,
+        "threshold": None,
+        "drop_reason": None,
     }
     reasons = [
         f"overlap={overlap}",
@@ -280,6 +308,17 @@ def exact_match(query_words: set[str], content_words: set[str], heading_words: s
         return 0.0
     hit_terms = query_terms & (content_words | heading_words)
     return min(1.0, len(hit_terms) / len(query_terms))
+
+
+def _heading_match_reason(query_tokens: set[str], heading_tokens: set[str]) -> str:
+    if not query_tokens:
+        return "empty_query_tokens"
+    if not heading_tokens:
+        return "empty_heading_tokens"
+    matched = sorted(query_tokens & heading_tokens)
+    if matched:
+        return f"matched:{','.join(matched)}"
+    return "heading_mismatch"
 
 
 def _expand_entity_neighbors(items: list[ContextItem], chunks) -> list[ContextItem]:
@@ -434,7 +473,30 @@ def intent_alignment(
 
 
 def tokenize(text: str) -> list[str]:
-    return re.findall(r"[가-힣a-zA-Z0-9_]+", text.lower())
+    return normalize_text_tokens(text)
+
+
+def normalize_query_tokens(text: str) -> list[str]:
+    tokens = normalize_text_tokens(text)
+    normalized: list[str] = []
+    for token in tokens:
+        stripped = _strip_korean_particle(token)
+        if not stripped or stripped in QUERY_FILLER_TOKENS:
+            continue
+        normalized.append(stripped)
+    return normalized
+
+
+def normalize_text_tokens(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    return re.findall(r"[가-힣a-zA-Z0-9_+-]+", lowered)
+
+
+def _strip_korean_particle(token: str) -> str:
+    for suffix in KOREAN_PARTICLE_SUFFIXES:
+        if token.endswith(suffix) and len(token) > len(suffix):
+            return token[: -len(suffix)]
+    return token
 
 
 def expand_query_words(query_words: set[str]) -> set[str]:

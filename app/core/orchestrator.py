@@ -1,3 +1,4 @@
+from dataclasses import replace
 import time
 import uuid
 
@@ -95,7 +96,10 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         selected_limit = 6
     else:
         selected_limit = 10
-    document_min_score = None if not query_mode else _document_min_score(document_candidates)
+    document_min_score = None if not query_mode else _document_min_score(
+        document_candidates,
+        query_type=intent_result.query_type,
+    )
     if document_min_score is not None:
         tentative = [
             candidate
@@ -109,6 +113,14 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         limit=selected_limit,
         min_score=document_min_score,
     )
+    if not selected_context and intent_result.query_type == "entity":
+        selected_context = _entity_fallback_context(document_candidates, selected_limit)
+        selected_ids = {item.id for item in selected_context}
+        dropped_context = [
+            item
+            for item in dropped_context + document_candidates
+            if item.id not in selected_ids
+        ]
     policy_dropped_count = max(0, len(req.recent_messages) - len(policy_recent_messages))
     survived_items, dropped_items, survival_reasons = ranker.survival_metadata(
         selected=selected_context,
@@ -231,12 +243,49 @@ def _retrieval_warning(selected_context, retrieval_confidence: float) -> str | N
     return None
 
 
-def _document_min_score(document_candidates) -> float | None:
+def _document_min_score(document_candidates, query_type: str = "what") -> float | None:
     if not document_candidates:
         return None
+    if query_type == "entity":
+        return 0.25
     top_score = max(item.score for item in document_candidates)
     if top_score >= 0.8:
         return max(0.50, round(top_score - 0.25, 4))
     if top_score >= 0.7:
         return max(0.40, round(top_score - 0.25, 4))
     return None
+
+
+def _entity_fallback_context(document_candidates, limit: int):
+    if not document_candidates:
+        return []
+    matched = [
+        item
+        for item in document_candidates
+        if item.score_breakdown.get("heading_overlap", 0) > 0
+        or item.score_breakdown.get("exact_match_score", 0.0) > 0
+    ]
+    fallback_items = matched or document_candidates
+    selected = sorted(
+        fallback_items,
+        key=lambda item: (
+            item.score_breakdown.get("heading_overlap", 0),
+            item.score_breakdown.get("exact_match_score", 0.0),
+            item.score,
+        ),
+        reverse=True,
+    )[:limit]
+    return [
+        replace(
+            item,
+            score=max(item.score, 0.25),
+            reason=f"{item.reason}, entity fallback exact/heading search",
+            score_breakdown={
+                **item.score_breakdown,
+                "entity_fallback": True,
+                "threshold": 0.25,
+                "drop_reason": None,
+            },
+        )
+        for item in selected
+    ]
