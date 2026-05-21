@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.api.schemas import Message
 from app.core.taxonomy import apply_taxonomy_boost, classify_chunk_taxonomy
@@ -27,7 +27,7 @@ DECISION_MARKERS = ["결정", "확정", "채택", "하기로 함", "하기로 �
 OVERVIEW_MARKERS = ["overview", "summary", "goals", "목표", "개요", "요약", "phase 계획", "phase", "architecture", "constraints", "제약"]
 CODING_MARKERS = ["error", "traceback", "파일", "함수", "class", "api", "endpoint", "expected", "actual", "구현"]
 SUMMARY_MARKERS = ["요약", "정리", "결정", "미결", "다음", "chronology"]
-HEADING_STOPWORDS = {"uce"}
+HEADING_STOPWORDS = set()
 GOAL_QUERY_MARKERS = {"목표", "목적", "뭐야", "무엇", "왜", "이유", "정의", "개요"}
 
 
@@ -35,6 +35,7 @@ def retrieve_context(
     current_message: Message,
     recent_messages: list[Message],
     intent_name: str = "continue_discussion",
+    query_type: str = "what",
     max_items: int = 15,
 ) -> list[ContextItem]:
     if not recent_messages:
@@ -54,6 +55,7 @@ def retrieve_context(
             role=message.role,
             importance=0.5,
             intent_name=intent_name,
+            query_type=query_type,
         )
         results.append(
             ContextItem(
@@ -94,6 +96,7 @@ def retrieve_document_chunks(
             role="document",
             importance=section.importance,
             intent_name=intent_name,
+            query_type=query_type,
             heading_level=section.heading_level,
         )
         boosted_score = apply_taxonomy_boost(score, taxonomy, query_type)
@@ -123,6 +126,8 @@ def retrieve_document_chunks(
                 taxonomy=taxonomy,
             )
         )
+    if query_type == "entity":
+        results = _expand_entity_neighbors(results, chunks)
     return sorted(results, key=lambda item: item.score, reverse=True)
 
 
@@ -135,6 +140,7 @@ def score_text(
     role: str,
     importance: float,
     intent_name: str,
+    query_type: str = "what",
     heading_level: int = 0,
 ) -> tuple[float, dict[str, float], str]:
     expanded_query_words = expand_query_words(query_words)
@@ -146,9 +152,13 @@ def score_text(
     semantic_score = overlap / len(query_words) if query_words else 0.0
     heading_overlap = len(heading_query_words & significant_heading_words)
     heading_score = heading_overlap / len(heading_query_words) if heading_query_words else 0.0
+    exact_match_score = exact_match(query_words=expanded_query_words, content_words=content_words, heading_words=heading_words)
     if heading_overlap:
         heading_score = min(1.0, heading_score + 0.4)
     heading_score = min(1.0, heading_score + phrase_heading_boost(query_words, heading_text))
+    if query_type == "entity":
+        heading_score = min(1.0, heading_score * 2.5)
+        exact_match_score = min(1.0, exact_match_score * 2.0)
     heading_depth = heading_text.count(">") + 1 if heading_text else 0
     section_priority_score = section_priority(section_path_text, expanded_query_words)
     section_coherence_score = section_coherence(content=content, heading_level=heading_level)
@@ -178,6 +188,7 @@ def score_text(
         + 0.08 * recency_score
         + 0.07 * constraint_score
         + 0.05 * role_score
+        + 0.10 * exact_match_score
     )
     final_score = final_score + (0.05 * decision_score) + (0.12 * section_priority_score)
     final_score += exact_heading_priority(section_path_text, expanded_query_words)
@@ -193,9 +204,15 @@ def score_text(
     final_score = min(1.0, final_score)
     breakdown = {
         "semantic_score": round(semantic_score, 4),
+        "bm25_score": 0.0,
         "heading_score": round(heading_score, 4),
+        "heading_overlap": heading_overlap,
+        "heading_match": sorted(heading_query_words & significant_heading_words),
+        "exact_match_score": round(exact_match_score, 4),
         "section_path_score": round(heading_score, 4),
         "heading_depth": heading_depth,
+        "query_type": query_type,
+        "chunk_size": len(content),
         "section_priority_score": round(section_priority_score, 4),
         "section_coherence_score": round(section_coherence_score, 4),
         "mismatch_penalty": round(mismatch_penalty, 4),
@@ -206,6 +223,7 @@ def score_text(
         "role_score": round(role_score, 4),
         "importance_score": round(importance_score, 4),
         "final_score": round(final_score, 4),
+        "truncation_reason": None,
     }
     reasons = [
         f"overlap={overlap}",
@@ -215,6 +233,8 @@ def score_text(
     ]
     if heading_overlap:
         reasons.append(f"heading direct match: {', '.join(sorted(heading_query_words & significant_heading_words))}")
+    if exact_match_score:
+        reasons.append("exact entity match")
     if section_priority_score:
         reasons.append("section priority boost")
     if section_coherence_score:
@@ -245,6 +265,60 @@ def marker_score(text: str, markers: list[str]) -> float:
     if count == 0:
         return 0.0
     return min(1.0, 0.45 + 0.2 * count)
+
+
+def exact_match(query_words: set[str], content_words: set[str], heading_words: set[str]) -> float:
+    query_terms = {word for word in query_words if len(word) >= 2 and not word.isdigit()}
+    entity_terms = {
+        word
+        for word in query_terms
+        if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_+-]*", word)
+    }
+    if entity_terms:
+        query_terms = entity_terms
+    if not query_terms:
+        return 0.0
+    hit_terms = query_terms & (content_words | heading_words)
+    return min(1.0, len(hit_terms) / len(query_terms))
+
+
+def _expand_entity_neighbors(items: list[ContextItem], chunks) -> list[ContextItem]:
+    item_by_id = {item.id: item for item in items}
+    hit_ids = {
+        item.id
+        for item in items
+        if item.score_breakdown.get("heading_overlap", 0) > 0
+        or item.score_breakdown.get("exact_match_score", 0.0) > 0
+    }
+    neighbor_ids: set[str] = set()
+    for section in chunks:
+        if section.id not in hit_ids:
+            continue
+        for key in ("previous_sibling_id", "next_sibling_id"):
+            neighbor_id = section.metadata.get(key)
+            if neighbor_id and neighbor_id in item_by_id:
+                neighbor_ids.add(neighbor_id)
+
+    expanded = []
+    for item in items:
+        if item.id not in neighbor_ids or item.id in hit_ids:
+            expanded.append(item)
+            continue
+        boosted = min(1.0, item.score + 0.08)
+        breakdown = {
+            **item.score_breakdown,
+            "neighbor_boost": round(boosted - item.score, 4),
+            "final_score": round(boosted, 4),
+        }
+        expanded.append(
+            replace(
+                item,
+                score=round(boosted, 4),
+                score_breakdown=breakdown,
+                reason=f"{item.reason}, entity neighbor expansion",
+            )
+        )
+    return expanded
 
 
 def section_priority(heading_text: str, query_words: set[str] | None = None) -> float:

@@ -11,6 +11,12 @@ GROUNDING_INSTRUCTIONS: dict[str, str] = {
         "정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.\n"
         "컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요."
     ),
+    "entity": (
+        "답변은 제공된 컨텍스트에만 근거해야 합니다.\n"
+        "약어(acronym)를 임의로 해석하거나 확장하지 마세요.\n"
+        "정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.\n"
+        "컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요."
+    ),
     "where": (
         "실행 위치, 배포 환경, 인프라 정보가 명시되지 않은 경우 "
         "'문서에 명시되지 않음'이라고 답하세요.\n"
@@ -145,4 +151,15 @@ def _trim_by_estimated_tokens(text: str, token_budget: int) -> str:
     char_budget = max(120, token_budget * 2)
     if len(text) <= char_budget:
         return text
-    return text[: char_budget - 3] + "..."
+    kept_lines: list[str] = []
+    used_chars = 0
+    for line in text.splitlines():
+        line_cost = len(line) + 1
+        if used_chars + line_cost > char_budget:
+            continue
+        kept_lines.append(line)
+        used_chars += line_cost
+    if not kept_lines:
+        return "- (context omitted by token budget)"
+    kept_lines.append("- (lower-ranked context omitted by token budget)")
+    return "\n".join(kept_lines)

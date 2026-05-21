@@ -67,6 +67,7 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
             current_message=current_message,
             recent_messages=policy_recent_messages,
             intent_name=intent_result.primary_intent,
+            query_type=intent_result.query_type,
             max_items=req.options.max_recent_messages,
         )
         document_query_message = current_message

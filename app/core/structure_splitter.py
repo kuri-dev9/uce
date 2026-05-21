@@ -47,17 +47,19 @@ def split_documents(
         else:
             nodes = [_SectionNode(title=title, heading_level=1, own_lines=[document.content])]
 
-        semantic_nodes = _semantic_retrieval_nodes(nodes)
+        semantic_nodes = _semantic_retrieval_nodes(nodes, max_chars=max_chars)
         for section_index, node in enumerate(semantic_nodes, start=1):
             node.section_id = f"{doc_id}_section_{section_index}"
 
         node_to_id = {id(node): node.section_id for node in semantic_nodes}
+        sibling_by_node = _retrieval_sibling_ids(semantic_nodes)
         for node in semantic_nodes:
             path = _heading_path(node)
             content = _subtree_content(node)
             descendant_titles = _descendant_titles(node)
             child_ids = [node_to_id[id(child)] for child in node.children if id(child) in node_to_id]
             parent_id = node_to_id.get(id(node.parent)) if node.parent else None
+            previous_sibling_id, next_sibling_id = sibling_by_node.get(id(node), (None, None))
             sections.append(
                 Section(
                     id=node.section_id,
@@ -73,11 +75,16 @@ def split_documents(
                     children=child_ids,
                     metadata={
                         "document_id": doc_id,
+                        "document": title,
                         "title": title,
                         "section_title": node.title or title,
+                        "heading": node.title or title,
+                        "section_path": path,
                         "header_path": path,
                         "heading_level": node.heading_level,
                         "parent_id": parent_id,
+                        "previous_sibling_id": previous_sibling_id,
+                        "next_sibling_id": next_sibling_id,
                         "children": child_ids,
                         "descendant_titles": descendant_titles,
                         "content_type": document.content_type,
@@ -171,7 +178,7 @@ def _is_module_level_line(line: str) -> bool:
     return True
 
 
-def _semantic_retrieval_nodes(nodes: list[_SectionNode]) -> list[_SectionNode]:
+def _semantic_retrieval_nodes(nodes: list[_SectionNode], max_chars: int) -> list[_SectionNode]:
     selected: list[_SectionNode] = []
 
     def walk(node: _SectionNode) -> None:
@@ -179,10 +186,15 @@ def _semantic_retrieval_nodes(nodes: list[_SectionNode]) -> list[_SectionNode]:
             for child in node.children:
                 walk(child)
             return
-        if node.heading_level in {1, 2}:
-            selected.append(node)
+        content = _subtree_content(node)
+        if node.heading_level == 2:
+            if len(content) <= max_chars or not node.children:
+                selected.append(node)
+                return
+            for child in node.children:
+                walk(child)
             return
-        if node.heading_level == 3 and not _nearest_retrievable_parent(node):
+        if node.heading_level >= 3:
             selected.append(node)
             return
         for child in node.children:
@@ -191,6 +203,21 @@ def _semantic_retrieval_nodes(nodes: list[_SectionNode]) -> list[_SectionNode]:
     for node in nodes:
         walk(node)
     return [node for node in selected if _subtree_content(node).strip()]
+
+
+def _retrieval_sibling_ids(nodes: list[_SectionNode]) -> dict[int, tuple[str | None, str | None]]:
+    sibling_ids: dict[int, tuple[str | None, str | None]] = {}
+    by_parent: dict[int | None, list[_SectionNode]] = {}
+    for node in nodes:
+        parent_key = id(node.parent) if node.parent else None
+        by_parent.setdefault(parent_key, []).append(node)
+
+    for siblings in by_parent.values():
+        for index, node in enumerate(siblings):
+            previous_id = siblings[index - 1].section_id if index > 0 else None
+            next_id = siblings[index + 1].section_id if index < len(siblings) - 1 else None
+            sibling_ids[id(node)] = (previous_id, next_id)
+    return sibling_ids
 
 
 def _nearest_retrievable_parent(node: _SectionNode) -> _SectionNode | None:
