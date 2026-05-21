@@ -1,7 +1,8 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.api.schemas import Message
+from app.core.taxonomy import apply_taxonomy_boost, classify_chunk_taxonomy
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,8 @@ class ContextItem:
     prompt_content: str | None = None
     importance: float = 0.5
     metadata: dict | None = None
+    taxonomy: list[str] = field(default_factory=list)
+    drop_reason: str | None = None
 
 
 CONSTRAINT_MARKERS = ["반드시", "필수", "절대 금지", "해야 한다", "제약", "유지"]
@@ -69,13 +72,19 @@ def retrieve_context(
     return sorted(results, key=lambda item: item.score, reverse=True)
 
 
-def retrieve_document_chunks(current_message: Message, chunks, intent_name: str = "continue_discussion") -> list[ContextItem]:
+def retrieve_document_chunks(
+    current_message: Message,
+    chunks,
+    intent_name: str = "continue_discussion",
+    query_type: str = "what",
+) -> list[ContextItem]:
     query_words = set(tokenize(current_message.content))
     results: list[ContextItem] = []
     for section in chunks:
         descendant_titles = " ".join(section.metadata.get("descendant_titles", []))
         section_path_text = str(section.metadata.get("header_path", ""))
         heading_text = " ".join(part for part in [section_path_text, descendant_titles] if part)
+        taxonomy = classify_chunk_taxonomy(section.content, section_path_text)
         score, breakdown, reason = score_text(
             query_words=query_words,
             content=section.content,
@@ -87,19 +96,27 @@ def retrieve_document_chunks(current_message: Message, chunks, intent_name: str 
             intent_name=intent_name,
             heading_level=section.heading_level,
         )
+        boosted_score = apply_taxonomy_boost(score, taxonomy, query_type)
+        taxonomy_boost = round(boosted_score - score, 4)
+        if taxonomy_boost:
+            breakdown = {**breakdown, "taxonomy_boost": taxonomy_boost, "final_score": round(boosted_score, 4)}
+            reason = f"{reason}, taxonomy boost: {query_type}->{', '.join(taxonomy)}"
+        else:
+            breakdown = {**breakdown, "taxonomy_boost": 0.0}
         results.append(
             ContextItem(
                 id=section.id,
                 source=f"document:{section.source}",
                 role="document",
                 content=section.content,
-                score=round(score, 4),
+                score=round(boosted_score, 4),
                 reason=reason,
                 score_breakdown=breakdown,
                 item_type="document_section",
                 prompt_content=section.prompt_content,
                 importance=section.importance,
                 metadata={**section.metadata, "query_words": sorted(query_words)},
+                taxonomy=taxonomy,
             )
         )
     return sorted(results, key=lambda item: item.score, reverse=True)

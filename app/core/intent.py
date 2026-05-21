@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from app.core.taxonomy import classify_query_type
+
 
 INTENT_KEYWORDS: dict[str, list[str]] = {
     "summarize": ["요약", "정리", "summary", "summarize", "recap"],
@@ -36,10 +38,12 @@ class IntentResult:
     requires_recent_context: bool
     requires_memory: bool
     requires_structured_output: bool
+    query_type: str = "what"
 
 
 def analyze_intent(message: str) -> IntentResult:
     message_lower = message.lower()
+    query_type = classify_query_type(message)
     scores: dict[str, int] = {}
 
     for intent, keywords in INTENT_KEYWORDS.items():
@@ -56,6 +60,7 @@ def analyze_intent(message: str) -> IntentResult:
             requires_recent_context=True,
             requires_memory=False,
             requires_structured_output=False,
+            query_type=query_type,
         )
 
     sorted_intents = sorted(scores.items(), key=lambda item: item[1], reverse=True)
@@ -72,4 +77,5 @@ def analyze_intent(message: str) -> IntentResult:
         requires_recent_context=True,
         requires_memory=primary in {"design", "coding", "analyze", "summarize"},
         requires_structured_output=primary in {"design", "summarize", "compare", "analyze"},
+        query_type=query_type,
     )

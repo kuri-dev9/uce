@@ -4,6 +4,22 @@ from app.core.compressor import CompressionResult
 from app.core.intent import IntentResult
 
 
+GROUNDING_INSTRUCTIONS: dict[str, str] = {
+    "where": (
+        "답변은 제공된 컨텍스트에만 근거해야 합니다.\n"
+        "실행 위치, 배포 환경이 명시되지 않은 경우 '문서에 명시되지 않음'이라고 답하세요.\n"
+        "클라우드, 서버, 인프라를 임의로 추정하지 마세요."
+    ),
+    "config": (
+        "설정값은 컨텍스트에 명시된 것만 안내하세요. 기본값을 추정하지 마세요."
+    ),
+    "default": (
+        "컨텍스트에 없는 사실을 추론하거나 가정하지 마세요.\n"
+        "정보가 부족한 경우 '해당 내용은 제공된 문서에 없습니다'라고 답하세요."
+    ),
+}
+
+
 PROMPT_TEMPLATE = """\
 [System Role]
 You are an assistant operating with a structured context pack.
@@ -41,7 +57,7 @@ Current focus: {current_focus}
 - Answer in Korean unless the user asks otherwise.
 - Be concrete and implementation-oriented.
 - Preserve important constraints and decisions.
-- If context is insufficient, state the gap clearly.
+{grounding_instructions}
 
 [Current User Question]
 {current_message}
@@ -54,16 +70,34 @@ def synthesize(
     compressed: CompressionResult,
     intent: IntentResult,
     max_tokens: int,
+    query_type: str = "what",
 ) -> str:
-    prompt = _render_prompt(current_message, state, compressed, intent, compressed.summary)
+    resolved_query_type = query_type
+    if query_type == "what":
+        resolved_query_type = getattr(intent, "query_type", query_type)
+    prompt = _render_prompt(
+        current_message,
+        state,
+        compressed,
+        intent,
+        compressed.summary,
+        resolved_query_type,
+    )
     if estimate_tokens(prompt) <= max_tokens:
         return prompt
 
-    fixed_prompt = _render_prompt(current_message, state, compressed, intent, "")
+    fixed_prompt = _render_prompt(current_message, state, compressed, intent, "", resolved_query_type)
     fixed_tokens = estimate_tokens(fixed_prompt)
     remaining_tokens = max(100, max_tokens - fixed_tokens)
     trimmed_summary = _trim_by_estimated_tokens(compressed.summary, remaining_tokens)
-    return _render_prompt(current_message, state, compressed, intent, trimmed_summary + "\n- (context truncated by token budget)")
+    return _render_prompt(
+        current_message,
+        state,
+        compressed,
+        intent,
+        trimmed_summary + "\n- (context truncated by token budget)",
+        resolved_query_type,
+    )
 
 
 def _render_prompt(
@@ -72,6 +106,7 @@ def _render_prompt(
     compressed: CompressionResult,
     intent: IntentResult,
     context_summary: str,
+    query_type: str,
 ) -> str:
     return PROMPT_TEMPLATE.format(
         current_goal=state.user_goal or state.current_focus or "현재 사용자 요청을 해결한다.",
@@ -85,12 +120,18 @@ def _render_prompt(
         decisions=_as_bullets(compressed.decisions),
         open_questions=_as_bullets(compressed.open_questions),
         facts=_as_bullets(compressed.facts),
+        grounding_instructions=_grounding_instructions(query_type),
         current_message=current_message.content,
     )
 
 
 def _as_bullets(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- none"
+
+
+def _grounding_instructions(query_type: str) -> str:
+    instructions = GROUNDING_INSTRUCTIONS.get(query_type, GROUNDING_INSTRUCTIONS["default"])
+    return "\n".join(f"- {line}" for line in instructions.splitlines())
 
 
 def _trim_by_estimated_tokens(text: str, token_budget: int) -> str:

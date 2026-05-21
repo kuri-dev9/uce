@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from app.api.schemas import Memory
 from app.core.retriever import ContextItem
 
@@ -10,13 +12,17 @@ def rank_context_items(
     sorted_items = sorted(items, key=lambda item: item.score, reverse=True)
     if min_score is None:
         selected = sorted_items[:limit]
-        dropped = sorted_items[limit:]
+        dropped = [_with_drop_reason(item, "limit_exceeded") for item in sorted_items[limit:]]
         return selected, dropped
 
     eligible = [item for item in sorted_items if item.score >= min_score]
     selected = eligible[:limit]
     selected_ids = {item.id for item in selected}
-    dropped = [item for item in sorted_items if item.id not in selected_ids]
+    dropped = [
+        _with_drop_reason(item, "limit_exceeded" if item.score >= min_score else "below_min_score")
+        for item in sorted_items
+        if item.id not in selected_ids
+    ]
     return selected, dropped
 
 
@@ -57,9 +63,15 @@ def _metadata_item(item: ContextItem, status: str) -> dict:
         "preview": _preview(item.prompt_content or item.content),
         "reason": item.reason,
         "score_breakdown": item.score_breakdown,
+        "taxonomy": item.taxonomy if hasattr(item, "taxonomy") else [],
+        "drop_reason": item.drop_reason if hasattr(item, "drop_reason") else None,
     }
 
 
 def _preview(text: str, limit: int = 180) -> str:
     compact = " ".join(text.split())
     return compact if len(compact) <= limit else compact[: limit - 3] + "..."
+
+
+def _with_drop_reason(item: ContextItem, reason: str) -> ContextItem:
+    return replace(item, drop_reason=reason)

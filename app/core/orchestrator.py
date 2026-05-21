@@ -78,10 +78,24 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         current_message=document_query_message,
         chunks=document_chunks,
         intent_name=intent_result.primary_intent,
+        query_type=intent_result.query_type,
     )
     all_candidates = context_candidates + document_candidates
-    selected_limit = len(document_candidates) if not query_mode else 6 if document_candidates else 10
+    if not query_mode:
+        selected_limit = len(document_candidates)
+    elif document_candidates:
+        selected_limit = min(len(document_candidates), 9)
+    else:
+        selected_limit = 10
     document_min_score = None if not query_mode else _document_min_score(document_candidates)
+    if document_min_score is not None:
+        tentative = [
+            candidate
+            for candidate in document_candidates
+            if candidate.score >= document_min_score
+        ]
+        if _retrieval_confidence(tentative) < 0.35:
+            document_min_score = None
     selected_context, dropped_context = ranker.rank_context_items(
         all_candidates,
         limit=selected_limit,
@@ -123,6 +137,7 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         compressed=compressed,
         intent=intent_result,
         max_tokens=max_prompt_tokens,
+        query_type=intent_result.query_type,
     )
 
     memory_text = "\n".join(memory.content for memory in req.optional_memories)
@@ -211,7 +226,7 @@ def _document_min_score(document_candidates) -> float | None:
         return None
     top_score = max(item.score for item in document_candidates)
     if top_score >= 0.8:
-        return max(0.65, round(top_score - 0.18, 4))
+        return max(0.50, round(top_score - 0.25, 4))
     if top_score >= 0.7:
-        return max(0.55, round(top_score - 0.18, 4))
+        return max(0.40, round(top_score - 0.25, 4))
     return None
