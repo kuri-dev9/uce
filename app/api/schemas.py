@@ -92,6 +92,8 @@ class BuildContextMetadata(BaseModel):
     primary_intent: str
     secondary_intents: list[str] = Field(default_factory=list)
     intent_confidence: float
+    query_type: str = "what"
+    compression_level: str = "medium"
     topic_relation: str
     context_policy: str
     topic_confidence: float

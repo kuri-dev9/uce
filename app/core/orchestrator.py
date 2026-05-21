@@ -14,6 +14,9 @@ from app.api.schemas import (
 from app.core import compressor, intent, prompt_synthesizer, ranker, retriever, state_builder, structure_splitter, topic
 
 
+SEMANTIC_INTENTS = {"explain", "continue_discussion"}
+
+
 def build_context(req: BuildContextRequest) -> BuildContextResponse:
     start = time.time()
     trace_id = str(uuid.uuid4())[:8]
@@ -56,6 +59,8 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         previous_state=req.previous_state,
     )
     policy_memories = topic.filter_memories_for_policy(topic_result, req.optional_memories)
+    if intent_result.primary_intent in SEMANTIC_INTENTS:
+        compression_level = "semantic"
 
     if query_mode:
         context_candidates = retriever.retrieve_context(
@@ -83,8 +88,10 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
     all_candidates = context_candidates + document_candidates
     if not query_mode:
         selected_limit = len(document_candidates)
-    elif document_candidates:
+    elif document_candidates and intent_result.primary_intent in SEMANTIC_INTENTS:
         selected_limit = min(len(document_candidates), 9)
+    elif document_candidates:
+        selected_limit = 6
     else:
         selected_limit = 10
     document_min_score = None if not query_mode else _document_min_score(document_candidates)
@@ -178,6 +185,8 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
             primary_intent=intent_result.primary_intent,
             secondary_intents=intent_result.secondary_intents,
             intent_confidence=intent_result.confidence,
+            query_type=intent_result.query_type,
+            compression_level=compression_level,
             topic_relation=topic_result.topic_relation,
             context_policy=topic_result.context_policy,
             topic_confidence=topic_result.confidence,

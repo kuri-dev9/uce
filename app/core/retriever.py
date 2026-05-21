@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.api.schemas import Message
 from app.core.taxonomy import apply_taxonomy_boost, classify_chunk_taxonomy
@@ -18,7 +18,7 @@ class ContextItem:
     prompt_content: str | None = None
     importance: float = 0.5
     metadata: dict | None = None
-    taxonomy: list[str] = field(default_factory=list)
+    taxonomy: tuple[str, ...] = ()
     drop_reason: str | None = None
 
 
@@ -99,7 +99,11 @@ def retrieve_document_chunks(
         boosted_score = apply_taxonomy_boost(score, taxonomy, query_type)
         taxonomy_boost = round(boosted_score - score, 4)
         if taxonomy_boost:
-            breakdown = {**breakdown, "taxonomy_boost": taxonomy_boost, "final_score": round(boosted_score, 4)}
+            breakdown = {
+                **breakdown,
+                "taxonomy_boost": taxonomy_boost,
+                "final_score": round(boosted_score, 4),
+            }
             reason = f"{reason}, taxonomy boost: {query_type}->{', '.join(taxonomy)}"
         else:
             breakdown = {**breakdown, "taxonomy_boost": 0.0}
@@ -150,7 +154,15 @@ def score_text(
     section_coherence_score = section_coherence(content=content, heading_level=heading_level)
     constraint_score = marker_score(content, CONSTRAINT_MARKERS)
     decision_score = marker_score(content, DECISION_MARKERS)
-    role_score = 0.8 if role == "user" else 0.55 if role == "assistant" else 0.65
+    if intent_name in {"explain", "continue_discussion"}:
+        if role == "document":
+            role_score = 0.85
+        elif role == "user":
+            role_score = 0.40
+        else:
+            role_score = 0.45
+    else:
+        role_score = 0.8 if role == "user" else 0.55 if role == "assistant" else 0.65
     importance_score = importance
     intent_alignment_score = intent_alignment(
         content=content,
@@ -165,6 +177,7 @@ def score_text(
         + 0.12 * intent_alignment_score
         + 0.08 * recency_score
         + 0.07 * constraint_score
+        + 0.05 * role_score
     )
     final_score = final_score + (0.05 * decision_score) + (0.12 * section_priority_score)
     final_score += exact_heading_priority(section_path_text, expanded_query_words)

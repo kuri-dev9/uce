@@ -20,12 +20,14 @@ MAX_CONTENT_LENGTH: dict[str, int] = {
     "light": 320,
     "medium": 180,
     "aggressive": 100,
+    "semantic": 600,
 }
 
 SECTION_CONTENT_LENGTH: dict[str, int] = {
     "light": 900,
     "medium": 520,
     "aggressive": 320,
+    "semantic": 1500,
 }
 
 

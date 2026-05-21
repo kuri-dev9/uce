@@ -710,6 +710,27 @@ Safety margin              15%   600 tokens
 - reasondock optional middleware 통합
 - fallback 및 prompt/debug metrics 검증
 
+### Phase 2.5: Semantic Preservation (🔄 진행 중)
+
+핵심 목표: **정의형/설명형 질문에서 발생하는 hallucination을 줄이고, 소형 로컬 LLM이 의미를 안정적으로 이해할 수 있는 semantic block을 유지한다.**
+
+배경:
+- 압축률 극대화 중심 설계가 소형 모델에서 acronym hallucination, 잘못된 정의 생성 유발
+- `compressor._compact()` medium 레벨(180자/섹션 520자)이 semantic unit 파괴
+- 정의형 질문에서 recent_message가 document보다 높은 score로 노이즈 우선 선택
+- `_document_min_score()` 공격적 필터링이 deployment/runtime 관련 청크 drop
+
+구현 대상:
+- `compression_level = "semantic"` 추가 — 섹션 1500자, heading+설명+예시 전체 유지
+- `explain/what` intent 시 orchestrator에서 semantic mode 자동 분기
+- 정의형 질문에서 document role_score 상향 (0.65 → 0.85), recent_message 하향 (0.8 → 0.4)
+- `_document_min_score()` 임계값 완화 (0.65 → 0.50)
+- adaptive fallback: retrieval confidence < 0.35이면 min_score 제거
+- `taxonomy.py` 신규 — query_type 분류 + section taxonomy + boosting
+- `prompt_synthesizer.py` — query_type별 grounding 지시 (hallucination suppression)
+
+상세 설계: `docs/semantic-preservation.md` 참조
+
 다음 단계:
 - NewSpeed 내장 통합
 - scenario 결과 리포트 포맷 정리

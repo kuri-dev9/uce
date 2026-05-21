@@ -63,14 +63,16 @@ def _metadata_item(item: ContextItem, status: str) -> dict:
         "preview": _preview(item.prompt_content or item.content),
         "reason": item.reason,
         "score_breakdown": item.score_breakdown,
-        "taxonomy": item.taxonomy if hasattr(item, "taxonomy") else [],
+        "taxonomy": list(item.taxonomy) if hasattr(item, "taxonomy") else [],
         "drop_reason": item.drop_reason if hasattr(item, "drop_reason") else None,
     }
 
 
-def _preview(text: str, limit: int = 180) -> str:
+def _preview(text: str, head: int = 700, tail: int = 300) -> str:
     compact = " ".join(text.split())
-    return compact if len(compact) <= limit else compact[: limit - 3] + "..."
+    if len(compact) <= head + tail + 3:
+        return compact
+    return f"{compact[:head]}...{compact[-tail:]}"
 
 
 def _with_drop_reason(item: ContextItem, reason: str) -> ContextItem:
