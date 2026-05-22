@@ -31,6 +31,9 @@ SECTION_TAXONOMY_KEYWORDS: dict[str, list[str]] = {
 
 QUERY_TAXONOMY_BOOST: dict[str, dict[str, float]] = {
     "entity": {"overview": 0.24, "architecture": 0.12, "feature": 0.10, "api": 0.08},
+    "continuation_query": {"overview": 0.18, "flow": 0.12, "feature": 0.08},
+    "implicit_subject_query": {"overview": 0.18, "flow": 0.12, "feature": 0.08},
+    "ellipsis_query": {"overview": 0.16, "flow": 0.10, "feature": 0.08},
     "where": {"deployment": 0.15, "runtime": 0.10, "architecture": 0.08},
     "what": {"overview": 0.20, "architecture": 0.10, "feature": 0.08},
     "how": {"flow": 0.12, "architecture": 0.08, "feature": 0.06},

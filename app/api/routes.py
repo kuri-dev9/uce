@@ -8,11 +8,14 @@ from app.api.schemas import (
     AnalyzeResponseResponse,
     BuildContextRequest,
     BuildContextResponse,
+    DenoiseRequest,
+    DenoiseResponse,
     HealthResponse,
     StatusResponse,
 )
 from app.core.orchestrator import build_context
 from app.core.response_analyzer import analyze_response
+from app.core.semantic_utility import denoise_document
 
 
 START_TIME = time.time()
@@ -27,6 +30,11 @@ def route_build_context(req: BuildContextRequest) -> BuildContextResponse:
 @router.post("/analyze-response", response_model=AnalyzeResponseResponse)
 def route_analyze_response(req: AnalyzeResponseRequest) -> AnalyzeResponseResponse:
     return analyze_response(req)
+
+
+@router.post("/denoise", response_model=DenoiseResponse)
+def route_denoise(req: DenoiseRequest) -> DenoiseResponse:
+    return denoise_document(req)
 
 
 @router.get("/health", response_model=HealthResponse)

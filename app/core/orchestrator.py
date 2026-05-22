@@ -13,6 +13,7 @@ from app.api.schemas import (
     PromptPack,
 )
 from app.core import compressor, intent, prompt_synthesizer, ranker, retriever, state_builder, structure_splitter, topic
+from app.core.query_rewriter import rewrite_query
 
 
 SEMANTIC_INTENTS = {"explain", "continue_discussion"}
@@ -63,15 +64,33 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
     if intent_result.primary_intent in SEMANTIC_INTENTS:
         compression_level = "semantic"
 
+    rewrite_result = rewrite_query(
+        current_message=current_message,
+        recent_messages=req.recent_messages,
+        previous_state=req.previous_state,
+        topic_confidence=topic_result.confidence,
+    )
+    retrieval_message = (
+        Message(role=current_message.role, content=rewrite_result.rewritten_query)
+        if rewrite_result.applied
+        else current_message
+    )
+    if rewrite_result.applied:
+        intent_result = replace(intent_result, query_type=rewrite_result.query_type)
+        if len(policy_recent_messages) < min(6, len(req.recent_messages)):
+            policy_recent_messages = req.recent_messages[-6:]
+        if req.previous_state:
+            policy_previous_state = req.previous_state
+
     if query_mode:
         context_candidates = retriever.retrieve_context(
-            current_message=current_message,
+            current_message=retrieval_message,
             recent_messages=policy_recent_messages,
             intent_name=intent_result.primary_intent,
             query_type=intent_result.query_type,
             max_items=req.options.max_recent_messages,
         )
-        document_query_message = current_message
+        document_query_message = retrieval_message
     else:
         context_candidates = []
         document_query_message = Message(role="user", content="summarize all sections by importance")
@@ -86,6 +105,11 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         chunks=document_chunks,
         intent_name=intent_result.primary_intent,
         query_type=intent_result.query_type,
+    )
+    document_candidates = _apply_continuity_boost(
+        document_candidates=document_candidates,
+        previous_state=req.previous_state,
+        enabled=rewrite_result.applied,
     )
     all_candidates = context_candidates + document_candidates
     if not query_mode:
@@ -207,6 +231,10 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
             secondary_intents=intent_result.secondary_intents,
             intent_confidence=intent_result.confidence,
             query_type=intent_result.query_type,
+            original_query=rewrite_result.original_query,
+            rewritten_query=rewrite_result.rewritten_query,
+            query_rewrite_applied=rewrite_result.applied,
+            query_rewrite_reason=rewrite_result.reason,
             compression_level=compression_level,
             topic_relation=topic_result.topic_relation,
             context_policy=topic_result.context_policy,
@@ -314,6 +342,65 @@ def _ensure_document_context(
     next_selected = list(selected)
     next_selected[replace_index] = promoted
     return next_selected, dropped + [replaced]
+
+
+def _apply_continuity_boost(document_candidates, previous_state, enabled: bool):
+    if not enabled or not previous_state or not document_candidates:
+        return document_candidates
+
+    continuity_terms = _continuity_terms(previous_state)
+    if not continuity_terms:
+        return document_candidates
+
+    boosted = []
+    for item in document_candidates:
+        searchable = " ".join(
+            [
+                item.content or "",
+                str((item.metadata or {}).get("header_path") or ""),
+                str((item.metadata or {}).get("title") or ""),
+                item.source or "",
+            ]
+        ).lower()
+        matched_terms = [term for term in continuity_terms if term.lower() in searchable]
+        if not matched_terms:
+            boosted.append(item)
+            continue
+        boost = min(0.22, 0.10 + (0.04 * len(matched_terms)))
+        boosted.append(
+            replace(
+                item,
+                score=round(min(1.0, item.score + boost), 4),
+                reason=f"{item.reason}, conversation continuity boost",
+                score_breakdown={
+                    **item.score_breakdown,
+                    "continuity_boost": round(boost, 4),
+                    "continuity_terms": matched_terms,
+                    "final_score": round(min(1.0, item.score + boost), 4),
+                },
+            )
+        )
+    return sorted(boosted, key=lambda item: item.score, reverse=True)
+
+
+def _continuity_terms(previous_state) -> list[str]:
+    terms = []
+    if previous_state.active_topic:
+        terms.append(previous_state.active_topic)
+        terms.extend(retriever.normalize_text_tokens(previous_state.active_topic))
+    terms.extend(previous_state.active_entities or [])
+    deduped = []
+    seen = set()
+    for term in terms:
+        normalized = str(term).strip()
+        if len(normalized) < 2:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped[:10]
 
 
 def _entity_fallback_context(document_candidates, limit: int):

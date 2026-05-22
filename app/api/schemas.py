@@ -39,6 +39,11 @@ class ConversationState(BaseModel):
     active_project: str | None = None
     current_focus: str | None = None
     user_goal: str | None = None
+    active_topic: str | None = None
+    active_entities: list[str] = Field(default_factory=list)
+    active_intent: str | None = None
+    active_documents: list[str] = Field(default_factory=list)
+    topic_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     important_constraints: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
@@ -93,6 +98,10 @@ class BuildContextMetadata(BaseModel):
     secondary_intents: list[str] = Field(default_factory=list)
     intent_confidence: float
     query_type: str = "what"
+    original_query: str | None = None
+    rewritten_query: str | None = None
+    query_rewrite_applied: bool = False
+    query_rewrite_reason: str | None = None
     compression_level: str = "medium"
     topic_relation: str
     context_policy: str
@@ -153,6 +162,23 @@ class AnalyzeResponseResponse(BaseModel):
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list)
     unresolved_issues: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DenoiseRequest(BaseModel):
+    document_id: str | None = None
+    content: str
+    content_type: Literal["markdown", "text", "code", "json", "yaml", "log", "docx", "xlsx", "dpe_ir"] = "text"
+    title: str | None = None
+    source: str | None = None
+
+
+class DenoiseResponse(BaseModel):
+    document_id: str | None = None
+    original_chars: int
+    denoised_chars: int
+    reduction_ratio: float
+    denoised_content: str
+    sections_found: int
 
 
 class HealthResponse(BaseModel):

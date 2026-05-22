@@ -2,6 +2,7 @@ import re
 
 from app.api.schemas import ConversationState, Memory, Message
 from app.core.intent import IntentResult
+from app.core.query_rewriter import infer_active_topic
 
 
 def build_state(
@@ -13,6 +14,18 @@ def build_state(
 ) -> ConversationState:
     state = previous_state.model_copy(deep=True) if previous_state else ConversationState()
     state.reasoning_mode = intent.reasoning_mode
+    state.active_intent = intent.primary_intent
+
+    active_topic, active_entities, topic_confidence = infer_active_topic(
+        current_message=current_message,
+        recent_messages=recent_messages,
+        previous_state=previous_state,
+    )
+    if active_topic:
+        state.active_topic = active_topic
+        state.topic_confidence = max(state.topic_confidence, topic_confidence)
+    if active_entities:
+        state.active_entities = _merge_unique(state.active_entities, active_entities)[:8]
 
     project = _guess_project_name(current_message.content)
     if project and (not state.active_project or project == state.active_project):
@@ -68,3 +81,11 @@ def _goal_from_intent(intent: str, message: str) -> str:
 def _append_unique(items: list[str], value: str) -> None:
     if value and value not in items:
         items.append(value)
+
+
+def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
+    merged = list(existing)
+    for item in incoming:
+        if item and item not in merged:
+            merged.append(item)
+    return merged
