@@ -113,6 +113,14 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         limit=selected_limit,
         min_score=document_min_score,
     )
+    if query_mode and document_candidates:
+        selected_context, dropped_context = _ensure_document_context(
+            selected=selected_context,
+            dropped=dropped_context,
+            document_candidates=document_candidates,
+            limit=selected_limit,
+            threshold=document_min_score,
+        )
     if not selected_context and intent_result.query_type == "entity":
         selected_context = _entity_fallback_context(document_candidates, selected_limit)
         selected_ids = {item.id for item in selected_context}
@@ -254,6 +262,58 @@ def _document_min_score(document_candidates, query_type: str = "what") -> float 
     if top_score >= 0.7:
         return max(0.40, round(top_score - 0.25, 4))
     return None
+
+
+def _ensure_document_context(
+    *,
+    selected,
+    dropped,
+    document_candidates,
+    limit: int,
+    threshold: float | None,
+):
+    if any(item.item_type == "document_section" for item in selected):
+        return selected, dropped
+    if not document_candidates:
+        return selected, dropped
+
+    best_document = max(document_candidates, key=lambda item: item.score)
+    promoted = replace(
+        best_document,
+        drop_reason=None,
+        score_breakdown={
+            **best_document.score_breakdown,
+            "threshold": threshold,
+            "drop_reason": None,
+            "forced_document_context": 1.0,
+        },
+        reason=f"{best_document.reason}, forced document context",
+    )
+    dropped = [item for item in dropped if item.id != promoted.id]
+
+    if len(selected) < limit:
+        return selected + [promoted], dropped
+
+    non_document_indexes = [
+        index
+        for index, item in enumerate(selected)
+        if item.item_type != "document_section"
+    ]
+    if not non_document_indexes:
+        return selected, dropped
+
+    replace_index = non_document_indexes[-1]
+    replaced = replace(
+        selected[replace_index],
+        drop_reason="replaced_by_document_context",
+        score_breakdown={
+            **selected[replace_index].score_breakdown,
+            "drop_reason": "replaced_by_document_context",
+        },
+    )
+    next_selected = list(selected)
+    next_selected[replace_index] = promoted
+    return next_selected, dropped + [replaced]
 
 
 def _entity_fallback_context(document_candidates, limit: int):

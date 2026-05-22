@@ -30,7 +30,7 @@ class DocumentInput(BaseModel):
     id: str | None = None
     title: str | None = None
     content: str
-    content_type: Literal["markdown", "text", "code", "json", "yaml", "log", "docx", "xlsx"] = "text"
+    content_type: Literal["markdown", "text", "code", "json", "yaml", "log", "docx", "xlsx", "dpe_ir"] = "text"
     source: str | None = None
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 

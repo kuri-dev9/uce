@@ -129,6 +129,11 @@ def retrieve_document_chunks(
             reason = f"{reason}, taxonomy boost: {query_type}->{', '.join(taxonomy)}"
         else:
             breakdown = {**breakdown, "taxonomy_boost": 0.0}
+        section_item_type = (
+            "dpe_ir_section"
+            if section.metadata.get("content_type") == "dpe_ir"
+            else "document_section"
+        )
         results.append(
             ContextItem(
                 id=section.id,
@@ -138,7 +143,7 @@ def retrieve_document_chunks(
                 score=round(boosted_score, 4),
                 reason=reason,
                 score_breakdown=breakdown,
-                item_type="document_section",
+                item_type=section_item_type,
                 prompt_content=section.prompt_content,
                 importance=section.importance,
                 metadata={**section.metadata, "query_words": sorted(query_words)},

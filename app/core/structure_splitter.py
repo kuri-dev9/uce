@@ -40,7 +40,7 @@ def split_documents(
     for doc_index, document in enumerate(documents):
         doc_id = document.id or f"doc_{doc_index + 1}"
         title = document.title or document.source or doc_id
-        if enabled and document.content_type == "markdown":
+        if enabled and document.content_type in {"markdown", "dpe_ir"}:
             nodes = _parse_markdown_sections(document.content)
         elif enabled and document.content_type == "code":
             nodes = _parse_code_sections(document.content)
@@ -185,6 +185,9 @@ def _semantic_retrieval_nodes(nodes: list[_SectionNode], max_chars: int) -> list
         if node.heading_level == 1 and node.children:
             for child in node.children:
                 walk(child)
+            return
+        if node.heading_level == 1 and not node.children:
+            selected.append(node)
             return
         content = _subtree_content(node)
         if node.heading_level == 2:
