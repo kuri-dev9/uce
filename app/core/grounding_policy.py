@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from app.core.xdr_relevance import compute_xdr_relevance
+
 
 class GroundingPolicy(str, Enum):
     GENERAL = "general"
@@ -20,21 +22,34 @@ def infer_policy(
     primary_intent: str = "what",
     query_type: str = "what",
     no_context_selected: bool = False,
+    query: str = "",
+    xdr_schema_hints: list[dict] | None = None,
 ) -> GroundingPolicy:
-    """Determine the grounding policy from context signal flags.
+    """Context signal + schema hints 기반 GroundingPolicy runtime inference.
 
     Priority:
-    1. no_context_selected → GENERAL (strict grounding would be vacuous)
-    2. xDR context present → XDR_ANALYSIS (HYBRID when retrieval also present)
-    3. retrieval context present → DOCUMENT_GROUNDED
-    4. fallback → GENERAL
+    1. no_context_selected AND not xdr_related → GENERAL
+    2. has_xdr_context (실제 xDR 결과 있음) → XDR_ANALYSIS (HYBRID when retrieval also present)
+    3. has_dataset_context AND schema relevance detected → XDR_ANALYSIS
+    4. has_retrieval_context → DOCUMENT_GROUNDED
+    5. fallback → GENERAL
     """
-    if no_context_selected or (retrieval_count == 0 and not has_xdr_context):
+    xdr_schema_related = False
+    if has_dataset_context and query and xdr_schema_hints:
+        xdr_schema_related, _ = compute_xdr_relevance(
+            query=query,
+            schema_hints=xdr_schema_hints,
+        )
+
+    if no_context_selected and not has_xdr_context and not xdr_schema_related:
         return GroundingPolicy.GENERAL
 
     if has_xdr_context:
         if has_retrieval_context and retrieval_count > 0:
             return GroundingPolicy.HYBRID
+        return GroundingPolicy.XDR_ANALYSIS
+
+    if has_dataset_context and xdr_schema_related:
         return GroundingPolicy.XDR_ANALYSIS
 
     if has_retrieval_context and retrieval_count > 0:

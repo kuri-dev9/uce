@@ -78,6 +78,7 @@ class BuildContextRequest(BaseModel):
     has_dataset_context: bool = False
     has_retrieval_context: bool = False
     retrieval_count: int = 0
+    xdr_schema_hints: list[dict] = Field(default_factory=list)
 
 
 class CompressedContext(BaseModel):
