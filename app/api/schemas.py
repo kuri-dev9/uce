@@ -74,6 +74,10 @@ class BuildContextRequest(BaseModel):
     optional_memories: list[Memory] = Field(default_factory=list)
     documents: list[DocumentInput] = Field(default_factory=list)
     options: BuildContextOptions = Field(default_factory=BuildContextOptions)
+    has_xdr_context: bool = False
+    has_dataset_context: bool = False
+    has_retrieval_context: bool = False
+    retrieval_count: int = 0
 
 
 class CompressedContext(BaseModel):
@@ -117,6 +121,7 @@ class BuildContextMetadata(BaseModel):
     survived_items: list[dict[str, Any]] = Field(default_factory=list)
     dropped_items: list[dict[str, Any]] = Field(default_factory=list)
     survival_reasons: dict[str, str] = Field(default_factory=dict)
+    grounding_policy: str | None = None
 
 
 class BuildContextResponse(BaseModel):

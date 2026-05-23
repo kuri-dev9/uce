@@ -13,6 +13,7 @@ from app.api.schemas import (
     PromptPack,
 )
 from app.core import compressor, intent, prompt_synthesizer, ranker, retriever, state_builder, structure_splitter, topic
+from app.core.grounding_policy import infer_policy
 from app.core.query_rewriter import rewrite_query
 
 
@@ -183,6 +184,14 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         level=compression_level,
     )
 
+    active_policy = infer_policy(
+        has_xdr_context=req.has_xdr_context,
+        has_dataset_context=req.has_dataset_context,
+        has_retrieval_context=req.has_retrieval_context,
+        retrieval_count=req.retrieval_count,
+        primary_intent=intent_result.primary_intent,
+        query_type=intent_result.query_type,
+    )
     prompt_content = prompt_synthesizer.synthesize(
         current_message=current_message,
         state=prompt_state,
@@ -190,6 +199,7 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         intent=intent_result,
         max_tokens=max_prompt_tokens,
         query_type=intent_result.query_type,
+        policy=active_policy,
     )
 
     memory_text = "\n".join(memory.content for memory in req.optional_memories)
@@ -250,6 +260,7 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
             survived_items=survived_items,
             dropped_items=dropped_items,
             survival_reasons=survival_reasons,
+            grounding_policy=active_policy.value,
         ),
     )
 

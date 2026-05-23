@@ -1,36 +1,71 @@
 from app.adapters.token_counter import estimate_tokens
 from app.api.schemas import ConversationState, Message
 from app.core.compressor import CompressionResult
+from app.core.grounding_policy import GroundingPolicy
 from app.core.intent import IntentResult
 
 
-GROUNDING_INSTRUCTIONS: dict[str, str] = {
-    "what": (
-        "답변은 제공된 컨텍스트에만 근거해야 합니다.\n"
-        "약어(acronym)를 임의로 해석하거나 확장하지 마세요.\n"
-        "정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.\n"
-        "컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요."
-    ),
-    "entity": (
-        "답변은 제공된 컨텍스트에만 근거해야 합니다.\n"
-        "약어(acronym)를 임의로 해석하거나 확장하지 마세요.\n"
-        "정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.\n"
-        "컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요."
-    ),
-    "where": (
-        "실행 위치, 배포 환경, 인프라 정보가 명시되지 않은 경우 "
-        "'문서에 명시되지 않음'이라고 답하세요.\n"
-        "클라우드, 서버, 인프라 환경을 임의로 추정하지 마세요."
-    ),
-    "config": (
-        "설정값과 환경변수는 컨텍스트에 명시된 것만 안내하세요.\n"
-        "기본값을 임의로 추정하지 마세요."
-    ),
-    "default": (
-        "컨텍스트에 없는 사실을 추론하거나 가정하지 마세요.\n"
-        "정보가 부족한 경우 '해당 내용은 제공된 문서에 없습니다'라고 답하세요."
-    ),
+_BASE_REQUIREMENTS = [
+    "- Answer in Korean unless the user asks otherwise.",
+    "- Be concrete and implementation-oriented.",
+    "- Preserve important constraints and decisions.",
+]
+
+_POLICY_RULES: dict[GroundingPolicy, list[str]] = {
+    GroundingPolicy.XDR_ANALYSIS: [
+        "- 아래 xDR 조사 데이터를 기반으로 markdown 표(| 컬럼 | ... |) 형식으로 답변하세요.",
+        "- 데이터에 없는 사실을 추론하거나 가정하지 마세요.",
+        "- IMSI 등 식별자는 그대로 표시하되 인덱스 번호를 붙여 구분하세요.",
+    ],
+    GroundingPolicy.DOCUMENT_RAG: [
+        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
+        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
+        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
+        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
+    ],
+    GroundingPolicy.HYBRID: [
+        "- xDR 데이터를 우선 근거로 사용하고, 문서 컨텍스트를 보조로 활용하세요.",
+        "- 데이터에 없는 사실을 추론하거나 가정하지 마세요.",
+        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
+    ],
 }
+
+_QUERY_TYPE_RULES: dict[str, list[str]] = {
+    "what": [
+        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
+        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
+        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
+        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
+    ],
+    "entity": [
+        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
+        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
+        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
+        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
+    ],
+    "where": [
+        "- 실행 위치, 배포 환경, 인프라 정보가 명시되지 않은 경우 '문서에 명시되지 않음'이라고 답하세요.",
+        "- 클라우드, 서버, 인프라 환경을 임의로 추정하지 마세요.",
+    ],
+    "config": [
+        "- 설정값과 환경변수는 컨텍스트에 명시된 것만 안내하세요.",
+        "- 기본값을 임의로 추정하지 마세요.",
+    ],
+}
+
+_DEFAULT_QUERY_RULES = [
+    "- 컨텍스트에 없는 사실을 추론하거나 가정하지 마세요.",
+    "- 정보가 부족한 경우 '해당 내용은 제공된 문서에 없습니다'라고 답하세요.",
+]
+
+
+def build_output_requirements(policy: GroundingPolicy, query_type: str = "what") -> str:
+    rules = list(_BASE_REQUIREMENTS)
+    if policy in _POLICY_RULES:
+        rules.extend(_POLICY_RULES[policy])
+    else:
+        rules.extend(_QUERY_TYPE_RULES.get(query_type, _DEFAULT_QUERY_RULES))
+    return "\n".join(rules)
 
 
 PROMPT_TEMPLATE = """\
@@ -67,10 +102,7 @@ Current focus: {current_focus}
 {facts}
 
 [Output Requirements]
-- Answer in Korean unless the user asks otherwise.
-- Be concrete and implementation-oriented.
-- Preserve important constraints and decisions.
-{grounding_instructions}
+{output_requirements}
 
 [Current User Question]
 {current_message}
@@ -84,10 +116,12 @@ def synthesize(
     intent: IntentResult,
     max_tokens: int,
     query_type: str = "what",
+    policy: GroundingPolicy | None = None,
 ) -> str:
     resolved_query_type = query_type
     if query_type == "what":
         resolved_query_type = getattr(intent, "query_type", query_type)
+    resolved_policy = policy if policy is not None else GroundingPolicy.GENERAL
     prompt = _render_prompt(
         current_message,
         state,
@@ -95,11 +129,14 @@ def synthesize(
         intent,
         compressed.summary,
         resolved_query_type,
+        resolved_policy,
     )
     if estimate_tokens(prompt) <= max_tokens:
         return prompt
 
-    fixed_prompt = _render_prompt(current_message, state, compressed, intent, "", resolved_query_type)
+    fixed_prompt = _render_prompt(
+        current_message, state, compressed, intent, "", resolved_query_type, resolved_policy
+    )
     fixed_tokens = estimate_tokens(fixed_prompt)
     remaining_tokens = max(100, max_tokens - fixed_tokens)
     trimmed_summary = _trim_by_estimated_tokens(compressed.summary, remaining_tokens)
@@ -110,6 +147,7 @@ def synthesize(
         intent,
         trimmed_summary + "\n- (context truncated by token budget)",
         resolved_query_type,
+        resolved_policy,
     )
 
 
@@ -120,6 +158,7 @@ def _render_prompt(
     intent: IntentResult,
     context_summary: str,
     query_type: str,
+    policy: GroundingPolicy,
 ) -> str:
     return PROMPT_TEMPLATE.format(
         current_goal=state.user_goal or state.current_focus or "현재 사용자 요청을 해결한다.",
@@ -133,18 +172,13 @@ def _render_prompt(
         decisions=_as_bullets(compressed.decisions),
         open_questions=_as_bullets(compressed.open_questions),
         facts=_as_bullets(compressed.facts),
-        grounding_instructions=_grounding_instructions(query_type),
+        output_requirements=build_output_requirements(policy, query_type),
         current_message=current_message.content,
     )
 
 
 def _as_bullets(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- none"
-
-
-def _grounding_instructions(query_type: str) -> str:
-    instructions = GROUNDING_INSTRUCTIONS.get(query_type, GROUNDING_INSTRUCTIONS["default"])
-    return "\n".join(f"- {line}" for line in instructions.splitlines())
 
 
 def _trim_by_estimated_tokens(text: str, token_budget: int) -> str:
