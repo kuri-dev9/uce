@@ -191,6 +191,7 @@ def build_context(req: BuildContextRequest) -> BuildContextResponse:
         retrieval_count=req.retrieval_count,
         primary_intent=intent_result.primary_intent,
         query_type=intent_result.query_type,
+        no_context_selected=len(selected_context) == 0,
     )
     prompt_content = prompt_synthesizer.synthesize(
         current_message=current_message,

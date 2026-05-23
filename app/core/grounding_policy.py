@@ -5,10 +5,10 @@ from enum import Enum
 
 
 class GroundingPolicy(str, Enum):
-    XDR_ANALYSIS = "xdr_analysis"
-    DOCUMENT_RAG = "document_rag"
-    HYBRID = "hybrid"
     GENERAL = "general"
+    DOCUMENT_GROUNDED = "document_grounded"
+    XDR_ANALYSIS = "xdr_analysis"
+    HYBRID = "hybrid"
 
 
 def infer_policy(
@@ -19,16 +19,25 @@ def infer_policy(
     retrieval_count: int = 0,
     primary_intent: str = "what",
     query_type: str = "what",
+    no_context_selected: bool = False,
 ) -> GroundingPolicy:
     """Determine the grounding policy from context signal flags.
 
-    Priority: xDR > document RAG > general.
-    If both xDR and retrieval context are present, use HYBRID.
+    Priority:
+    1. no_context_selected → GENERAL (strict grounding would be vacuous)
+    2. xDR context present → XDR_ANALYSIS (HYBRID when retrieval also present)
+    3. retrieval context present → DOCUMENT_GROUNDED
+    4. fallback → GENERAL
     """
+    if no_context_selected or (retrieval_count == 0 and not has_xdr_context):
+        return GroundingPolicy.GENERAL
+
     if has_xdr_context:
         if has_retrieval_context and retrieval_count > 0:
             return GroundingPolicy.HYBRID
         return GroundingPolicy.XDR_ANALYSIS
+
     if has_retrieval_context and retrieval_count > 0:
-        return GroundingPolicy.DOCUMENT_RAG
+        return GroundingPolicy.DOCUMENT_GROUNDED
+
     return GroundingPolicy.GENERAL

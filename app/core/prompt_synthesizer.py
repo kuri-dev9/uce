@@ -5,67 +5,44 @@ from app.core.grounding_policy import GroundingPolicy
 from app.core.intent import IntentResult
 
 
-_BASE_REQUIREMENTS = [
-    "- Answer in Korean unless the user asks otherwise.",
-    "- Be concrete and implementation-oriented.",
-    "- Preserve important constraints and decisions.",
-]
-
-_POLICY_RULES: dict[GroundingPolicy, list[str]] = {
-    GroundingPolicy.XDR_ANALYSIS: [
-        "- 아래 xDR 조사 데이터를 기반으로 markdown 표(| 컬럼 | ... |) 형식으로 답변하세요.",
-        "- 데이터에 없는 사실을 추론하거나 가정하지 마세요.",
-        "- IMSI 등 식별자는 그대로 표시하되 인덱스 번호를 붙여 구분하세요.",
-    ],
-    GroundingPolicy.DOCUMENT_RAG: [
-        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
-        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
-        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
-        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
-    ],
-    GroundingPolicy.HYBRID: [
-        "- xDR 데이터를 우선 근거로 사용하고, 문서 컨텍스트를 보조로 활용하세요.",
-        "- 데이터에 없는 사실을 추론하거나 가정하지 마세요.",
-        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
-    ],
+_REQUIREMENTS: dict[GroundingPolicy, str] = {
+    GroundingPolicy.GENERAL: (
+        "- Answer in Korean unless the user asks otherwise.\n"
+        "- Be natural and conversational.\n"
+        "- You may use general knowledge when no relevant context exists.\n"
+        "- If context is insufficient, continue the conversation naturally."
+    ),
+    GroundingPolicy.DOCUMENT_GROUNDED: (
+        "- Answer in Korean unless the user asks otherwise.\n"
+        "- Base the answer primarily on the provided context.\n"
+        "- Do not invent facts not supported by the retrieved documents.\n"
+        "- If information is missing, explicitly state that the document does not contain it."
+    ),
+    GroundingPolicy.XDR_ANALYSIS: (
+        "- Answer in Korean unless the user asks otherwise.\n"
+        "- Base the answer only on the provided xDR dataset results.\n"
+        "- Do not assume facts not present in the query result.\n"
+        "- Use markdown tables when presenting structured xDR results.\n"
+        "- Preserve identifiers such as IMSI, IMEI, MME_ID exactly as provided."
+    ),
+    GroundingPolicy.HYBRID: (
+        "- Answer in Korean unless the user asks otherwise.\n"
+        "- Use xDR dataset results as the primary source.\n"
+        "- Supplement with document context where relevant.\n"
+        "- Do not assume facts not present in the provided data.\n"
+        "- Use markdown tables when presenting structured xDR results."
+    ),
 }
-
-_QUERY_TYPE_RULES: dict[str, list[str]] = {
-    "what": [
-        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
-        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
-        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
-        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
-    ],
-    "entity": [
-        "- 답변은 제공된 컨텍스트에만 근거해야 합니다.",
-        "- 약어(acronym)를 임의로 해석하거나 확장하지 마세요.",
-        "- 정의가 문서에 없으면 '문서에 명시되지 않음'이라고 답하세요.",
-        "- 컨텍스트 외의 일반 지식으로 정의를 보완하지 마세요.",
-    ],
-    "where": [
-        "- 실행 위치, 배포 환경, 인프라 정보가 명시되지 않은 경우 '문서에 명시되지 않음'이라고 답하세요.",
-        "- 클라우드, 서버, 인프라 환경을 임의로 추정하지 마세요.",
-    ],
-    "config": [
-        "- 설정값과 환경변수는 컨텍스트에 명시된 것만 안내하세요.",
-        "- 기본값을 임의로 추정하지 마세요.",
-    ],
-}
-
-_DEFAULT_QUERY_RULES = [
-    "- 컨텍스트에 없는 사실을 추론하거나 가정하지 마세요.",
-    "- 정보가 부족한 경우 '해당 내용은 제공된 문서에 없습니다'라고 답하세요.",
-]
 
 
 def build_output_requirements(policy: GroundingPolicy, query_type: str = "what") -> str:
-    rules = list(_BASE_REQUIREMENTS)
-    if policy in _POLICY_RULES:
-        rules.extend(_POLICY_RULES[policy])
-    else:
-        rules.extend(_QUERY_TYPE_RULES.get(query_type, _DEFAULT_QUERY_RULES))
-    return "\n".join(rules)
+    """Build Output Requirements section from GroundingPolicy.
+
+    query_type is accepted for interface compatibility but no longer drives
+    strict-grounding rule selection — policy is the sole authority.
+    GENERAL never includes strict grounding rules.
+    """
+    return _REQUIREMENTS.get(policy, _REQUIREMENTS[GroundingPolicy.GENERAL])
 
 
 PROMPT_TEMPLATE = """\
