@@ -5,6 +5,13 @@ from app.core.intent import IntentResult
 from app.core.query_rewriter import infer_active_topic
 
 
+_TRIVIAL_PATTERNS = re.compile(
+    r"^(안녕|hello|hi|hey|ㅋ+|ㅎ+|ㅠ+|ㅜ+|고마워|감사|ok|오케이|알겠|알았)"
+    r"|\b(날씨|주식|뉴스|맛집)\b",
+    re.IGNORECASE,
+)
+
+
 def build_state(
     recent_messages: list[Message],
     current_message: Message,
@@ -31,8 +38,10 @@ def build_state(
     if project and (not state.active_project or project == state.active_project):
         state.active_project = project
 
-    if not state.current_focus or intent.primary_intent != "continue_discussion":
-        state.current_focus = _compact_focus(current_message.content)
+    state.current_focus = _compact_focus(current_message.content)
+    state.open_questions = [
+        question for question in state.open_questions if not _is_trivial_message(question)
+    ]
 
     if not state.user_goal:
         state.user_goal = _goal_from_intent(intent.primary_intent, current_message.content)
@@ -47,9 +56,20 @@ def build_state(
 
     for message in recent_messages[-5:]:
         if message.role == "user" and "?" in message.content:
-            _append_unique(state.open_questions, _compact_focus(message.content, limit=90))
+            if not _is_trivial_message(message.content):
+                _append_unique(state.open_questions, _compact_focus(message.content, limit=90))
 
     return state
+
+
+def _is_trivial_message(text: str) -> bool:
+    """Skip greetings and small talk that should not become open questions."""
+    stripped = text.strip()
+    if len(stripped) <= 5:
+        return True
+    if _TRIVIAL_PATTERNS.search(stripped):
+        return True
+    return False
 
 
 def _guess_project_name(text: str) -> str | None:

@@ -138,7 +138,7 @@ def _render_prompt(
     policy: GroundingPolicy,
 ) -> str:
     return PROMPT_TEMPLATE.format(
-        current_goal=state.user_goal or state.current_focus or "현재 사용자 요청을 해결한다.",
+        current_goal=state.current_focus or current_message.content or "현재 사용자 요청을 해결한다.",
         primary_intent=intent.primary_intent,
         secondary_intents=", ".join(intent.secondary_intents) or "none",
         reasoning_mode=intent.reasoning_mode,
